@@ -1,0 +1,7 @@
+include ieo.py
+include ENVIfile.py
+include modistools.py
+include config/ieo.ini
+include config/__init__.py
+include data/__init__.py
+include data/ieo.gdb/*
