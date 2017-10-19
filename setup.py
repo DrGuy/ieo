@@ -27,16 +27,13 @@ if not os.path.isfile(ini):
         output.write('archdir = %s\n'%y)
         y = input('Please input the log directory: ')
         output.write('logdir = %s\n'%y)
-        # y = input('Please input the location of Landsat WRS polygon geodatabase (must end in .gdb): ')
-        # output.write('WRS1 = %s\n'%os.path.join(y,'Ireland_WRS1_Landsat_1_3_ITM'))
-        # output.write('WRS2 = %s\n'%os.path.join(y,'Ireland_WRS2_Landsat_4_8_ITM'))
     
 setup(
     # Application name:
     name='ieo',
 
     # Version number:
-    version='1.0.5',
+    version='1.0.6',
 
     # Application author details:
     author='Guy Serbin',
