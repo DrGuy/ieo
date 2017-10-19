@@ -4,7 +4,7 @@
 # email: guy <dot> serbin <at> teagasc <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.0.5 
+# version 1.0.6 
 
 import os, datetime, time, shutil, sys, glob, csv, ENVIfile, modistools, numpy, numexpr
 from xml.dom import minidom
@@ -49,6 +49,7 @@ if os.path.isfile(config_path):
     catdir = config['DEFAULT']['catdir']
     archdir = config['DEFAULT']['archdir']
     logdir = config['DEFAULT']['logdir']
+    landsatshp = os.path.join(catdir, 'WRS2_Ireland_scenes.shp')
     WRS1 = os.path.join(gdb_path, 'Ireland_WRS1_Landsat_1_3_ITM') # WRS-1, Landsats 1-3
     WRS2 = os.path.join(gdb_path, 'Ireland_WRS2_Landsat_4_8_ITM') # WRS-2, Landsats 4-8
     defaulterrorfile = os.path.join(logdir, 'errors.csv')
