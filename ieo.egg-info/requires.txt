@@ -1,3 +1,0 @@
-numexpr
-numpy
-gdal
