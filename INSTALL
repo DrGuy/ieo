@@ -1,0 +1,23 @@
+Irish Earth Observation (IEO) remote sensing data processing Python module installation instructions
+
+In order to run, you will need to have installed the following:
+
+Python. I've specifically used the Continuum Analytics distributions (https://www.continuum.io/downloads), and utilised packages from conda-forge (there are some compilation issues with the standard conda Python compilations of GDAL), though you could also use ones that are available via pip or easy_install, assuming that you have proper compilation methods set up for your operating systems (Windows users: this is why I suggest using Anaconda or Miniconda). You will need the following packages for this to work:
+
+1. numpy
+2. numexpr (latest version, earlier versions had memory leak issues)
+3. gdal
+
+How to install them via conda? Simple:
+
+> conda install -c conda-forge numpy numexpr gdal
+
+Then hit yes for any additional packages needed.
+
+Then install the Irish Earth Observation (IEO) module (https://github.com/DrGuy/ieo) from the directory in which is resides via:
+
+> python setup.py --install
+
+During setup, you will need to input the following information:
+1. Required: the base directory for IEO output data. This will automatically create several subdirectories for you. Subdirectories will be created on a per-satellite basis (currently only Landsat).
+2. Optional: alternate IEO catalog, data ingest and archive, and log file directories. By default, these will be in the automatically created in the base IEO directory. The data ingest and archive directories are for the files that you'll download from the imagery provider, e.g., USGS/EROS. The files will automatically be downloaded into the ingest directory, and after extraction and processing, said tar.gz or zip files will be copied over to the archive directory.
