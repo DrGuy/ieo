@@ -1,10 +1,17 @@
 #!/usr/bin/env python
-import os, sys
+import os, sys, shutil
 from setuptools import setup, find_packages
+
+def newinidir(dirname):
+    # this function creates new directories on disk if they are missing
+    if not os.path.isdir(dirname):
+        print('Creating: {}'.format(dirname))
+        os.mkdir(dirname)
 
 # create configuration for installation if missing
 
 configdir = os.path.join(os.path.dirname(__file__), 'config')
+lcatdir = os.path.join(os.path.dirname(__file__), 'catalog')
 if not os.path.isdir(configdir):
     os.mkdir(configdir)
 
@@ -12,20 +19,45 @@ ini = os.path.join(configdir, 'ieo.ini')
 if not os.path.isfile(ini):
     with open(ini, 'w') as output:
         output.write('[DEFAULT]\n')
-        x = input('Please input the base directory for imagery data (includes Fmask, SR, BT, NDVI, EVI subdirectories): ')
+        w = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')
+        newinidir(w)
+        x = input('Please input the base directory for Landsat imagery data (includes Fmask, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(w, 'Landsat')))
+        if len(x) == 0:
+            x = os.path.join(w, 'Landsat')
+        newinidir(x)
         for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI']:
-            output.write('%sdir = %s\n'%(y.lowercase(),os.path.join(x,y)))
-        y = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(x, 'catalog'))
-        if len(y) == 0 or not os.path.isdir(y):
+            dirname = os.path.join(x, y)
+            newinidir(dirname)
+            output.write('%sdir = %s\n'%(y.lowercase(), dirname))
+        y = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(w, 'catalog'))
+        if len(y) == 0:
             y = os.path.join(x, 'catalog')
+        newinidir(y)
+        badlistfile = os.path.join(y, 'badlist.txt')
+        cpb = False
+        if not os.path.isfile(badlistfile):
+            cpb = True
+        else:
+            ans = input('Bad date text file {} exists. Overwrite? (y/N): '.format(badlistfile))
+            if ans.lowercase() == 'y' or ans.lowercase() == 'yes':
+                cpb = True
+        if cpb:
+            shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
         output.write('catdir = %s\n'%y)
         y = input('Please input the data ingest directory (will use %s if not set): '%os.path.join(x, 'ingest'))
         if len(y) == 0 or not os.path.isdir(y):
             y = os.path.join(x, 'ingest')
+        newinidir(y)
         output.write('ingestdir = %s\n'%y)
-        y = input('Please input the post-processing tar.gz archive directory: ')
+        y = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(w, 'archive'))
+        if len(y) == 0 or not os.path.isdir(y):
+            y = os.path.join(w, 'archive')
+        newinidir(y)
         output.write('archdir = %s\n'%y)
-        y = input('Please input the log directory: ')
+        y = input('Please input the log directory (will use %s if not set): '%os.path.join(w, 'logs'))
+        if len(y) == 0 or not os.path.isdir(y):
+            y = os.path.join(w, 'logs')
+        newinidir(y)
         output.write('logdir = %s\n'%y)
     
 setup(
