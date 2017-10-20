@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys
+import os, sys, shutil
 from setuptools import setup, find_packages
 
 def newinidir(dirname):
@@ -11,6 +11,7 @@ def newinidir(dirname):
 # create configuration for installation if missing
 
 configdir = os.path.join(os.path.dirname(__file__), 'config')
+lcatdir = os.path.join(os.path.dirname(__file__), 'catalog')
 if not os.path.isdir(configdir):
     os.mkdir(configdir)
 
@@ -32,6 +33,16 @@ if not os.path.isfile(ini):
         if len(y) == 0:
             y = os.path.join(x, 'catalog')
         newinidir(y)
+        badlistfile = os.path.join(y, 'badlist.txt')
+        cpb = False
+        if not os.path.isfile(badlistfile):
+            cpb = True
+        else:
+            ans = input('Bad date text file {} exists. Overwrite? (y/N): '.format(badlistfile))
+            if ans.lowercase() == 'y' or ans.lowercase() == 'yes':
+                cpb = True
+        if cpb:
+            shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
         output.write('catdir = %s\n'%y)
         y = input('Please input the data ingest directory (will use %s if not set): '%os.path.join(x, 'ingest'))
         if len(y) == 0 or not os.path.isdir(y):
