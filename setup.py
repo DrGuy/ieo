@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, shutil
+import os, sys, shutil, glob
 from setuptools import setup, find_packages
 
 def newinidir(dirname):
@@ -12,6 +12,9 @@ def newinidir(dirname):
 
 configdir = os.path.join(os.path.dirname(__file__), 'config')
 lcatdir = os.path.join(os.path.dirname(__file__), 'catalog')
+ldatadir = os.path.join(os.path.dirname(__file__), 'data')
+lgdb = os.path.join(ldatadir, 'ieo.gdb')
+
 if not os.path.isdir(configdir):
     os.mkdir(configdir)
 
@@ -34,7 +37,7 @@ if not os.path.isfile(ini):
             y = os.path.join(x, 'catalog')
         newinidir(y)
         badlistfile = os.path.join(y, 'badlist.txt')
-        cpb = False
+        cpb = False # copy badlist.txt to catdir
         if not os.path.isfile(badlistfile):
             cpb = True
         else:
@@ -44,6 +47,25 @@ if not os.path.isfile(ini):
         if cpb:
             shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
         output.write('catdir = %s\n'%y)
+        cpb = False # copy ieo.gdb to catdir
+        gdbdir = os.path.join(y, 'ieo.gdb')
+        if not os.path.isdir(gdbdir):
+            cpb = True
+            os.mkdir(gdbdir)
+        else:
+            ans = input('GDB {} exists. Overwrite? (y/N): '.format(badlistfile))
+            if ans.lowercase() == 'y' or ans.lowercase() == 'yes':
+                cpb = True
+        if cpb:
+            lflist = glob.glob(lcatdir, '*.*')
+            gflist = glob.glob(gdbdir, '*.*')
+            if len(gflist) > 0:
+                print('Deleting old GDB files.')
+                for f in gflist:
+                    os.remove(f)
+                print('Copying GDB.')
+                for f in lflist:
+                    shutil.copy(f, gdbdir)
         y = input('Please input the data ingest directory (will use %s if not set): '%os.path.join(x, 'ingest'))
         if len(y) == 0 or not os.path.isdir(y):
             y = os.path.join(x, 'ingest')
@@ -84,6 +106,7 @@ setup(
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Scientific/Engineering :: GIS'
     ],
 
@@ -93,8 +116,8 @@ setup(
     scripts = ['ieo.py', 'modistools.py','ENVIfile.py'],
     include_package_data = True,
     
-    packages = find_packages(include = ['.', 'config', 'data'], exclude = ['__pycache__', 'build', 'dist', 'ieo.egg-info']),
-    package_data = {'config': ['*',], 'data': ['*',], 'data/ieo.gdb': ['*',]},
+    packages = find_packages(include = ['.', 'config', 'data']),
+    package_data = {'config': ['*',],}, #  'data': ['*',], 'data/ieo.gdb': ['*',]
     # Dependent packages (distributions)
     install_requires=[
         'numexpr',

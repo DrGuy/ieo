@@ -6,6 +6,7 @@ Home-page: UNKNOWN
 Author: Guy Serbin
 Author-email: UNKNOWN
 License: UNKNOWN
+Description-Content-Type: UNKNOWN
 Description: UNKNOWN
 Platform: UNKNOWN
 Classifier: Programming Language :: Python
@@ -16,4 +17,5 @@ Classifier: Programming Language :: Python :: 3.2
 Classifier: Programming Language :: Python :: 3.3
 Classifier: Programming Language :: Python :: 3.4
 Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
 Classifier: Topic :: Scientific/Engineering :: GIS
