@@ -9,6 +9,7 @@
 import os, datetime, time, shutil, sys, glob, csv, ENVIfile, modistools, numpy, numexpr
 from xml.dom import minidom
 from subprocess import Popen
+from pkg_resources import resource_stream, resource_string, resource_filename, Requirement
 from ENVIfile import *
 
 # Import GDAL
@@ -34,30 +35,42 @@ if sys.version_info[0] == 2:
 else:
     import configparser
 
-config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'ieo.ini')
-gdb_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'ieo.gdb')
 
-if os.path.isfile(config_path):
-    config = configparser.ConfigParser()
-    config.read(config_path)
-    fmaskdir = config['DEFAULT']['fmaskdir']
-    srdir = config['DEFAULT']['srdir']
-    btdir = config['DEFAULT']['btdir']
-    ingestdir = config['DEFAULT']['ingestdir']
-    ndvidir = config['DEFAULT']['ndvidir']
-    evidir = config['DEFAULT']['evidir']
-    catdir = config['DEFAULT']['catdir']
-    archdir = config['DEFAULT']['archdir']
-    logdir = config['DEFAULT']['logdir']
-    landsatshp = os.path.join(catdir, 'WRS2_Ireland_scenes.shp')
-    WRS1 = os.path.join(gdb_path, 'Ireland_WRS1_Landsat_1_3_ITM') # WRS-1, Landsats 1-3
-    WRS2 = os.path.join(gdb_path, 'Ireland_WRS2_Landsat_4_8_ITM') # WRS-2, Landsats 4-8
-    defaulterrorfile = os.path.join(logdir, 'errors.csv')
-else:
-    print('ERROR: no configuration data found.')
-    print(sys.argv)
-    print(sys.argv[0])
-    sys.exit()
+# Access configuration data inside Python egg
+config = configparser.ConfigParser()
+#config_file = 'ieo.ini'
+#config_location = resource_stream(__name__, config_file)
+#config_path = os.path.join(__name__, 'config')
+config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
+#gdbp = os.path,join(__name__, 'data')
+#gdb_path = resource_stream(Requirement.parse('ieo'), 'data/ieo.gdb')
+#config_path = os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config'), 'ifordeo.ini')
+#config.read(config_location)
+#config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'ieo.ini')
+
+
+#if os.path.isfile(config_path):
+#    config = configparser.ConfigParser()
+config.read(config_location) # config_path
+fmaskdir = config['DEFAULT']['fmaskdir']
+srdir = config['DEFAULT']['srdir']
+btdir = config['DEFAULT']['btdir']
+ingestdir = config['DEFAULT']['ingestdir']
+ndvidir = config['DEFAULT']['ndvidir']
+evidir = config['DEFAULT']['evidir']
+catdir = config['DEFAULT']['catdir']
+archdir = config['DEFAULT']['archdir']
+logdir = config['DEFAULT']['logdir']
+landsatshp = os.path.join(catdir, 'WRS2_Ireland_scenes.shp')
+gdb_path = os.path.join(catdir, 'ieo.gdb')
+WRS1 = os.path.join(gdb_path, 'Ireland_WRS1_Landsat_1_3_ITM') # WRS-1, Landsats 1-3
+WRS2 = os.path.join(gdb_path, 'Ireland_WRS2_Landsat_4_8_ITM') # WRS-2, Landsats 4-8
+defaulterrorfile = os.path.join(logdir, 'errors.csv')
+#else:
+#    print('ERROR: no configuration data found.')
+#    print(sys.argv)
+#    print(sys.argv[0])
+#    sys.exit()
 
 ## Some functions
 
@@ -786,4 +799,3 @@ def runledaps(filename, outdir):
     p=Popen(['do_ledaps.py','-f',filename])
     print(p.communicate())
     print('Processing complete for '+sceneid+'.')   
-    

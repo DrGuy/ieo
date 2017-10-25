@@ -1,5 +1,6 @@
 ENVIfile.py
 MANIFEST.in
+README.md
 ieo.py
 modistools.py
 setup.py
