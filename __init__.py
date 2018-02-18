@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "Guy Serbin"
-__version__ = "1.0.6"
-__all__ = ["ieo", "ENVIfile", "modistools"]
+__version__ = "1.1.0"
+__all__ = ["ieo", "ENVIfile"]
 __main__ = "ieo"
 
