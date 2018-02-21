@@ -2,13 +2,15 @@ ENVIfile.py
 MANIFEST.in
 README.md
 ieo.py
-modistools.py
 setup.py
 config/__init__.py
+config/ieo - Copy.ini
 config/ieo.ini
+config/sample_ieo.ini
 data/__init__.py
 data/ieo.gdb/__init__.py
 data/ieo.gdb/a00000001.TablesByName.atx
+data/ieo.gdb/a00000001.freelist
 data/ieo.gdb/a00000001.gdbindexes
 data/ieo.gdb/a00000001.gdbtable
 data/ieo.gdb/a00000001.gdbtablx
@@ -20,6 +22,7 @@ data/ieo.gdb/a00000003.gdbtablx
 data/ieo.gdb/a00000004.CatItemsByPhysicalName.atx
 data/ieo.gdb/a00000004.CatItemsByType.atx
 data/ieo.gdb/a00000004.FDO_UUID.atx
+data/ieo.gdb/a00000004.freelist
 data/ieo.gdb/a00000004.gdbindexes
 data/ieo.gdb/a00000004.gdbtable
 data/ieo.gdb/a00000004.gdbtablx
@@ -70,6 +73,10 @@ data/ieo.gdb/a0000000e.gdbindexes
 data/ieo.gdb/a0000000e.gdbtable
 data/ieo.gdb/a0000000e.gdbtablx
 data/ieo.gdb/a0000000e.spx
+data/ieo.gdb/a0000000f.gdbindexes
+data/ieo.gdb/a0000000f.gdbtable
+data/ieo.gdb/a0000000f.gdbtablx
+data/ieo.gdb/a0000000f.spx
 data/ieo.gdb/gdb
 data/ieo.gdb/timestamps
 ieo.egg-info/PKG-INFO

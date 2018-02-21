@@ -2,11 +2,23 @@
 import os, sys, shutil, glob
 from setuptools import setup, find_packages
 
+# configuration data
+if sys.version_info[0] == 2:
+    import ConfigParser as configparser
+else:
+    import configparser
+
+
+
+
 def newinidir(dirname):
     # this function creates new directories on disk if they are missing
     if not os.path.isdir(dirname):
         print('Creating: {}'.format(dirname))
         os.mkdir(dirname)
+
+# Access configuration data in installation directory
+
 
 # create configuration for installation if missing
 
@@ -21,156 +33,176 @@ updatedini = False
 ini = os.path.join(configdir, 'ieo.ini')
 inilines = []
 if os.path.isfile(ini):
-    with open(ini, 'r') as lines:
-        for line in lines:
-            inilines.append(line)
-            if '[Projection]' in line:
-                updatedini = True
+    ieo_config = configparser.ConfigParser()
+    ieo_config.read(ini) # config_path
+    if 'Projection' in ieo_config.keys():
+        updatedini = True
 
 # checks to see if sample_ieo.ini exists, and if so, load file data
 samplelines = []
 sconfig = False
 if os.path.isfile(sampleconfig):
     sconfig = True
-    with open(sampleconfig, 'r') as lines:
-        for line in lines:
-            samplelines.append(line)
+    sieo_config = configparser.ConfigParser()
+    sieo_config.read(ini) # config_path
 
 # check to see if either sample_ieo.ini or ieo.ini are up to date
 scb = False # Boolean flag, if set to True, copy sample_ieo.ini to ieo.ini
 sc = '' 
-dirdict = {} # dict containing dirname keys and file paths
 if updatedini:
     sc = input('An updated ieo.ini was found. Do you wish to use this file as is (DEFAULT = "N")? (y/N): ')
     if sc.lower() == 'y' or sc.lower == 'yes':
-        for line in samplelines:
-            if 'dir = ' in line:
-                i = line.find('=') + 2
-                h = line.find(' ')                
-                dirdict[line[:h]] = line[i:].rstrip('\n')
-                if line[:h] == 'catdir':
-                    dirdict['landsatcatdir'] = os.path.join(line[:h], 'Landsat')
-                    dirdict['basedir'] = os.path.dirname(line[:h])
-                elif line[:h] == 'fmaskdir':
-                    dirdict['landsatdir'] = os.path.dirname(line[i:].rstrip('\n'))
         scb = True
 if sconfig and not scb:
     sc = input('Have you edited sample_ieo.ini to suit your archive configuration? (DEFAULT = "N", answering "Y" will save these data to ieo.ini (y/N): ')
     if sc.lower() == 'y' or sc.lower == 'yes':
-        with open(ini, 'w') as output:
-            for line in samplelines:
-                if 'dir = ' in line:
-                    i = line.find('=') + 2
-                    h = line.find(' ')                
-                    dirdict[line[:h]] = line[i:].rstrip('\n')
-                    if line[:h] == 'catdir':
-                        dirdict['landsatcatdir'] = os.path.join(line[:h], 'Landsat')
-                        dirdict['basedir'] = os.path.dirname(line[:h])
-                    elif line[:h] == 'fmaskdir':
-                        dirdict['landsatdir'] = os.path.dirname(line[i:].rstrip('\n'))
-                output.write(line)
+        ieo_config = sieo_config
+        if os.path.isfile(ini):
+            import datetime
+            now = datetime.datetime.now()
+            bak = ini.replace('.ini', '.{}.bak'.format(now.strftime('%Y%m%d-%H%M%S')))
+            print('Backing up ieo.ini to: {}'.format(bak))
+            shutil.move(ini, bak)
+            print('Copying sample_ieo.ini to ieo.ini.')
+            shutil.copy(sampleconfig, ini)
         scb = True
+
 
 lcatdir = os.path.join(os.path.dirname(__file__), 'catalog') 
 ldatadir = os.path.join(os.path.dirname(__file__), 'data')
 lgdb = os.path.join(ldatadir, 'ieo.gdb')
 
-if not scb:
+if not scb: # build a new config file object
+    ieo_config = configparser.ConfigParser()
     print('Now creating a new ieo.ini with custom input.')
-    with open(ini, 'w') as output:
-        # DEFAULT section
-        output.write('[DEFAULT]\n')
-        w = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')
-        dirdict['basedir'] = w
-        x = input('Please input the base directory for Landsat imagery data (includes Fmask, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(w, 'Landsat')))
-        if len(x) == 0:
-            x = os.path.join(w, 'Landsat')
-        dirdict['landsatdir'] = x
-        for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI']:
-            dirname = os.path.join(x, y)
-            output.write('%sdir = %s\n'%(y.lower(), dirname))
-            dirdict['{}dir'.format(y.lower())] = dirname 
-        y = input('Please input the data ingest directory (will use %s if not set): '%os.path.join(x, 'ingest'))
-        if len(y) == 0:
-            y = os.path.join(x, 'ingest')
-        output.write('ingestdir = %s\n'%y)
-        dirdict['ingestdir'] = y
-        archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(w, 'archive'))
-        if len(archdir) == 0:
-            archdir = os.path.join(w, 'archive')
-        
-        output.write('archdir = %s\n'%archdir)
-        dirdict['archdir'] = archdir
-        logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(w, 'logs'))
-        if len(logdir) == 0:
-            logdir = os.path.join(w, 'logs')
-        dirdict['logdir'] = logdir
-        output.write('logdir = %s\n'%logdir)
-        catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(w, 'catalog'))
-        if len(catdir) == 0:
-            catdir = os.path.join(x, 'Catalog')
-            dirdict['catdir'] = catdir
-            landsatcatdir = os.path.join(catdir, 'Landsat')
-            dirdict['landsatcatdir'] = landsatcatdir
-            tiledir = os.path.join(x, 'tiles')
-        output.write('catdir = %s\n'%catdir)
-        output.write('GDBname = ieo.gdb\n')
-        
-        # right now these are filled wil IEO defaults. I will write a customisable installer for the upcoming sections later
-        # VECTOR section
-        output.write('\n[VECTOR]\n')
-        output.write('\n# Important note: only the shapefile or layer base names, not\n')
-        output.write('\n# absolute file paths, are stored here. The GDB is stored separately.\n')
-        output.write('landsatshp = WRS2_Ireland_scenes.shp\n')
-        output.write('WRS1 = Ireland_WRS1_Landsat_1_3_ITM\n')
-        output.write('WRS2 = Ireland_WRS2_Landsat_4_8_ITM\n')
-        output.write('Sen2tiles = Ireland_Sentinel2_tiles_ITM\n')
-        output.write('nationaltilesystem = AIRT\n')
-        
-        # Projection section
-        output.write('\n[Projection]\n')
-        output.write('# projacronym should contain only characters allowed in filenames, and no spaces\n')
-        output.write('proj = EPSG:2157\n')
-        output.write('projacronym = ITM\n')
+    
+    # DEFAULT section
+    ieo_config['DEFAULT'] = {}
+    basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')
+    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat')))
+    if len(basedir) == 0:
+        landsatdir = os.path.join(basedir, 'Landsat')
+    for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI']:
+        dirname = os.path.join(landsatdir, y)
+        ieo_config['DEFAULT'][y] = dirname 
+    y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest'))
+    if len(y) == 0:
+        y = os.path.join(landsatdir, 'Ingest')
+    ieo_config['DEFAULT']['ingestdir'] = y
+    archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(basedir, 'archive'))
+    if len(archdir) == 0:
+        archdir = os.path.join(basedir, 'archive')
+    ieo_config['DEFAULT']['archdir'] = archdir
+    logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(basedir, 'logs'))
+    if len(logdir) == 0:
+        logdir = os.path.join(basedir, 'logs')
+    ieo_config['DEFAULT']['logdir'] = logdir
+    catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(basedir, 'Catalog'))
+    if len(catdir) == 0:
+        catdir = os.path.join(basedir, 'Catalog')
+        ieo_config['DEFAULT']['catdir'] = catdir
+    
+    ieo_config['DEFAULT']['GDBname'] = 'ieo.gdb'
+    
+    # right now these are filled wil IEO defaults. I will write a customisable installer for the upcoming sections later
+    # VECTOR section
+    ieo_config['VECTOR'] = {}
+    y = input('Please input the base filename for the Landsat scene catalogue shapefile (will use WRS2_Ireland_scenes.shp if not set): ')
+    if len(y) == 0:
+        y = 'WRS2_Ireland_scenes.shp'
+    ieo_config['VECTOR']['landsatshp'] = y
+    y = input('Please input the layer name for the generic Landsat WRS-1 scene polygons (will use Ireland_WRS1_Landsat_1_3_ITM if not set): ')
+    if len(y) == 0:
+        y = 'Ireland_WRS1_Landsat_1_3_ITM'
+    ieo_config['VECTOR']['WRS1'] = 'Ireland_WRS2_Landsat_4_8_ITM'
+    y = input('Please input the layer name for the generic Landsat WRS-2 scene polygons (will use Ireland_WRS2_Landsat_4_8_ITM if not set): ')
+    if len(y) == 0:
+        y = 'Ireland_WRS2_Landsat_4_8_ITM'
+    ieo_config['VECTOR']['WRS2'] = y
+    y = input('Please input the layer name for the generic Sentinel-2 scene scene polygons (will use Ireland_Sentinel2_tiles_ITM if not set): ')
+    if len(y) == 0:
+        y = 'Ireland_Sentinel2_tiles_ITM'
+    ieo_config['VECTOR']['Sen2tiles'] = y
+    y = input('Please input the layer name for the local tile system grid (will use AIRT if not set): ')
+    if len(y) == 0:
+        y = 'AIRT'
+    ieo_config['VECTOR']['nationaltilesystem'] = 'AIRT'
+    
+    # Projection section
+    ieo_config['Projection'] = {}
+    y = input('Please input the projection code, including "EPSG:" (will use "EPSG:2157" if not set): ')
+    if len(y) == 0:
+        y = 'EPSG:2157'
+    ieo_config['Projection']['proj'] = y
+    y = input('Please input the projection acronym (will use "ITM" if not set): ')
+    if len(y) == 0:
+        y = 'EPSG:2157'
+    ieo_config['Projection']['projacronym'] = y
 
-        # makegrid section
-        output.write('\n[makegrid]\n')
-        output.write('minX = 418500.0\n')
-        output.write('minY = 519000.0\n')
-        output.write('maxX = 769500.0\n')
-        output.write('maxY = 969000.0\n')
-        output.write('xtiles = 12\n')
-        output.write('ytiles = 15\n')
+    # makegrid section
+    ieo_config['makegrid'] = {}
+    y = input('Please input the minX value for the local tile system grid (will use 418500.0 if not set): ')
+    if len(y) == 0:
+        y = '418500.0'
+    ieo_config['makegrid']['minX'] = y
+    y = input('Please input the minY value for the local tile system grid (will use 519000.0 if not set): ')
+    if len(y) == 0:
+        y = '519000.0'
+    ieo_config['makegrid']['minY'] = y
+    y = input('Please input the maxX value for the local tile system grid (will use 769500.0 if not set): ')
+    if len(y) == 0:
+        y = '769500.0'
+    ieo_config['makegrid']['maxX'] = y
+    y = input('Please input the maxY value for the local tile system grid (will use 969000.0 if not set): ')
+    if len(y) == 0:
+        y = '969000.0'
+    ieo_config['makegrid']['maxY'] = y
+    y = input('Please input the number of xtiles for the local tile system grid (will use 12 if not set): ')
+    if len(y) == 0:
+        y = '12'
+    ieo_config['makegrid']['xtiles'] = y
+    y = input('Please input the number of ytiles for the local tile system grid (will use 15 if not set): ')
+    if len(y) == 0:
+        y = '15' 
+    ieo_config['makegrid']['ytiles'] = y
+    ieo_config.write(ini)
+else:
+    basedir = os.path.dirname(ieo_config['DEFAULT']['catdir'])
+    landsatdir = os.path.join(basedir, 'Landsat')
+
+
+landsatcatdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'Landsat')
+basebasedir = os.path.dirname(basedir)
 
 # Create missing directories on disk 
-for d in [os.path.dirname(dirdict['basedir']), dirdict['basedir'], dirdict['landsatdir'], dirdict['catdir']]:
+for d in [basebasedir, basedir, landsatdir, ieo_config['DEFAULT']['catdir'], landsatcatdir]:
     newinidir(d)
-for key in dirdict.keys(): # this actually processes some values for the second time, but does nothing if the directories exist
-    newinidir(dirdict[key])
+for key in ieo_config['DEFAULT'].keys(): # this actually processes some values for the second time, but does nothing if the directories exist
+    newinidir(ieo_config['DEFAULT'][key])
 
 # copy data files to Catalogue directory
-badlistfile = os.path.join(dirdict['landsatcatdir'], 'badlist.txt')
+badlistfile = os.path.join(landsatcatdir, 'badlist.txt')
 cpb = False # copy badlist.txt to catdir
 if not os.path.isfile(badlistfile):
     cpb = True
 else:
     ans = input('Bad date text file {} exists. Overwrite? (y/N): '.format(badlistfile))
-    if ans.lowercase() == 'y' or ans.lowercase() == 'yes':
+    if ans.lower() == 'y' or ans.lower() == 'yes':
         cpb = True
 if cpb:
     shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
 cpb = False # copy ieo.gdb to catdir
-gdbdir = os.path.join(dirdict['catdir'], 'ieo.gdb')
+gdbdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'ieo.gdb')
 if not os.path.isdir(gdbdir):
     cpb = True
     os.mkdir(gdbdir)
 else:
-    ans = input('GDB {} exists. Overwrite? (y/N): '.format(badlistfile))
-    if ans.lowercase() == 'y' or ans.lowercase() == 'yes':
+    ans = input('GDB {} exists. Overwrite? (y/N): '.format(gdbdir))
+    if ans.lower() == 'y' or ans.lower() == 'yes':
         cpb = True
 if cpb:
-    lflist = glob.glob(ldatadir, '*.*')
-    gflist = glob.glob(gdbdir, '*.*')
+    lflist = glob.glob(os.path.join(ldatadir, '*.*'))
+    gflist = glob.glob(os.path.join(gdbdir, '*.*'))
     if len(gflist) > 0:
         print('Deleting old GDB files.')
         for f in gflist:
@@ -226,6 +258,6 @@ setup(
         'numexpr',
         'numpy',
         'gdal',
-        'PIL'
+        'pillow'
     ],
 )

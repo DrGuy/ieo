@@ -14,7 +14,7 @@ config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
 config.read(config_location) # config_path
 
 # Spatial variables
-prjvalstr = config['Projection']['prj']
+prjvalstr = config['Projection']['proj']
 if ':' in prjvalstr:
     i = prjvalstr.find(':') + 1
     prjval = int(prjvalstr[i:])
