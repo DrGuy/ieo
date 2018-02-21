@@ -1,18 +1,28 @@
 #/usr/bin/python
 import os, sys, shutil, datetime
 from osgeo import osr
+from pkg_resources import resource_stream, resource_string, resource_filename, Requirement
+if sys.version_info[0] == 2:
+    import ConfigParser as configparser
+else:
+    import configparser
 
-
-
-## Global variables
+# Read in config information
+global prjval, projinfo, mapinfostr, gcsstring, prj
+config = configparser.ConfigParser()
+config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
+config.read(config_location) # config_path
 
 # Spatial variables
+prjvalstr = config['Projection']['proj']
+if ':' in prjvalstr:
+    i = prjvalstr.find(':') + 1
+    prjval = int(prjvalstr[i:])
+else:
+    prjval = int(prjvalstr) # This assumes that the config value contains on the EPSG value.
 
 prj = osr.SpatialReference()
-prj.SetProjection("EPSG:2157")
-
-# Directory and file paths
-
+prj.ImportFromEPSG(prjval) # "EPSG:2157"
 
 # Shamelessly copied from http://pydoc.net/Python/spectral/0.17/spectral.io.envi/
 # import numpy as np
@@ -234,7 +244,7 @@ class ENVIfile(object):
         
         # Various data passed from other functions
         self.header.geoTrans = kwargs.get('geoTrans', None)
-        self.header.acqtime = kwargs.get('acqtime',None)
+        self.header.acqtime = kwargs.get('acqtime', None)
         self.file.outfilename = kwargs.get('outfilename', None)
         self.header.headeroffset = 'header offset = 0\n'
         self.header.byteorder = 'byte order = 0\n'
@@ -268,12 +278,28 @@ class ENVIfile(object):
         
         if not headeronly:
             self.header.interleave = 'interleave = bsq\n'
-            self.header.projinfo = 'projection info = {3, 6378137.0, 6356752.3, 53.500000, -8.000000, 600000.0, 750000.0, 0.999820, D_IRENET95, IRENET95_Irish_Transverse_Mercator, units=Meters}\n'
-            self.header.mapinfo = 'map info = {IRENET95_Irish_Transverse_Mercator, 1.0000, 1.0000, %d, %d, 3.0000000000e+001, 3.0000000000e+001, D_IRENET95, units=Meters}\n'%(self.header.geoTrans[0],self.header.geoTrans[3])
-            self.header.gcsstring = 'coordinate system string = {PROJCS["IRENET95_Irish_Transverse_Mercator",GEOGCS["GCS_IRENET95",DATUM["D_IRENET95",SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",600000.0],PARAMETER["False_Northing",750000.0],PARAMETER["Central_Meridian",-8.0],PARAMETER["Scale_Factor",0.99982],PARAMETER["Latitude_Of_Origin",53.5],UNIT["Meter",1.0]]}\n'
+            self.header.gcsstring = 'coordinate system string = {' + prj.ExportToWkt() + '}\n'
+            self.header.mapinfo = 'map info = {'
+            projname = prj.GetAttrValue('projcs')
+            self.header.mapinfo += '{}, 1, 1'.format(projname)
+            self.header.mapinfo += ', {}, {}, {}, {}'.format(self.header.geoTrans[0], self.header.geoTrans[3], abs(self.header.geoTrans[1]), abs(self.header.geoTrans[5]))
+            if ' UTM ' in projname:
+                if projname[-1:] == 'N':
+                    UTMnorth = 'North'
+                else: 
+                    UTMnorth = 'South'
+                i = projname.rfind(' ') + 1
+                UTMzone = projname[i:-1]
+                self.header.mapinfo += ', {}, {}'.format(UTMzone, UTMnorth)
+            unitval = prj.GetAttrValue('unit')
+            if unitval.lower() == 'metre':
+                unitval = 'Meters'
+            self.header.mapinfo += ', {}, units={}'.format(prj.GetAttrValue('datum'), unitval)
+            self.header.mapinfo += '}\n'
+            self.header.projinfo = None
             self.file.datadims(self)
             self.getdictdata()
-            self.header.hdr = self.file.outfilename.replace('.dat','.hdr')
+            self.header.hdr = self.file.outfilename.replace('.dat', '.hdr')
         else:
             self.header.readheader(self)
         
@@ -425,6 +451,7 @@ class ENVIfile(object):
         self.file.data = None
     
     def WriteHeader(self):
+        # Shamelessly adapted from http://pydoc.net/Python/spectral/0.17/spectral.io.envi/
         self.header.prepheader(self)
         if os.path.exists(self.header.hdr):
             now = datetime.datetime.now()
@@ -472,7 +499,6 @@ class ENVIfile(object):
                         if not line.startswith('ENVI'):
                             if not openline:
                                 i = line.find(' = ')
-                                j = i + 3
                                 if i > 0:
                                     if line.startswith('interleave'):
                                         self.header.interleave = line
@@ -514,7 +540,8 @@ class ENVIfile(object):
                 else:
                     self.header.headerstr += 'file type = ENVI Standard\n'
                 for x in [self.header.headeroffset, self.header.byteorder, self.header.mapinfo, self.header.projinfo, self.header.gcsstring, self.header.bandnames]:
-                    self.header.headerstr += x
+                    if x:
+                        self.header.headerstr += x
                 if self.header.dataignorevalue:
                     self.header.headerstr += self.header.dataignorevalue
                 if self.header.classes:
@@ -537,7 +564,8 @@ class ENVIfile(object):
                 if self.header.parentrasters:   
                     self.header.headerstr += self.header.parentrasters
                 return 
-            
+                
+                        
         class colorfile:
             def __init__(self):
                 self._parent_class = _parent_class # Easy access from self.

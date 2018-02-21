@@ -1,3 +1,4 @@
 numexpr
 numpy
 gdal
+pillow
