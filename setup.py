@@ -8,9 +8,6 @@ if sys.version_info[0] == 2:
 else:
     import configparser
 
-
-
-
 def newinidir(dirname):
     # this function creates new directories on disk if they are missing
     if not os.path.isdir(dirname):
@@ -70,7 +67,7 @@ if sconfig and not scb:
 
 lcatdir = os.path.join(os.path.dirname(__file__), 'catalog') 
 ldatadir = os.path.join(os.path.dirname(__file__), 'data')
-lgdb = os.path.join(ldatadir, 'ieo.gdb')
+#lgdb = os.path.join(ldatadir, 'ieo.gdb')
 
 if not scb: # build a new config file object
     ieo_config = configparser.ConfigParser()
@@ -79,10 +76,10 @@ if not scb: # build a new config file object
     # DEFAULT section
     ieo_config['DEFAULT'] = {}
     basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')
-    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat')))
+    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, pixel_qa, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat')))
     if len(basedir) == 0:
         landsatdir = os.path.join(basedir, 'Landsat')
-    for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI']:
+    for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI', 'pixel_qa']:
         dirname = os.path.join(landsatdir, y)
         ieo_config['DEFAULT'][y] = dirname 
     y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest'))
@@ -102,8 +99,12 @@ if not scb: # build a new config file object
         catdir = os.path.join(basedir, 'Catalog')
         ieo_config['DEFAULT']['catdir'] = catdir
     
-    ieo_config['DEFAULT']['GDBname'] = 'ieo.gdb'
+#    ieo_config['DEFAULT']['GDBname'] = 'ieo.gdb'
     
+    useProductID = input('Use 40 character Landsat Product ID for output files, rather than the default 21 character Scene IDs? (y/ N): ')
+    if not (useProductID.lower() == 'yes' or useProductID.lower() == 'y'):
+        useProductID = 'No'
+    ieo_config['DEFAULT']['useProductID'] = useProductID
     # right now these are filled wil IEO defaults. I will write a customisable installer for the upcoming sections later
     # VECTOR section
     ieo_config['VECTOR'] = {}
@@ -136,7 +137,7 @@ if not scb: # build a new config file object
     ieo_config['Projection']['proj'] = y
     y = input('Please input the projection acronym (will use "ITM" if not set): ')
     if len(y) == 0:
-        y = 'EPSG:2157'
+        y = 'ITM'
     ieo_config['Projection']['projacronym'] = y
 
     # makegrid section
@@ -192,34 +193,34 @@ else:
 if cpb:
     shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
 cpb = False # copy ieo.gdb to catdir
-gdbdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'ieo.gdb')
-if not os.path.isdir(gdbdir):
+shpdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'shapefiles')
+if not os.path.isdir(shpdir):
     cpb = True
-    os.mkdir(gdbdir)
+    os.mkdir(shpdir)
 else:
-    ans = input('GDB {} exists. Overwrite? (y/N): '.format(gdbdir))
+    ans = input('Shapefile directory {} exists. Overwrite? (y/N): '.format(shpdir))
     if ans.lower() == 'y' or ans.lower() == 'yes':
         cpb = True
 if cpb:
     lflist = glob.glob(os.path.join(ldatadir, '*.*'))
-    gflist = glob.glob(os.path.join(gdbdir, '*.*'))
+    gflist = glob.glob(os.path.join(shpdir, '*.*'))
     if len(gflist) > 0:
-        print('Deleting old GDB files.')
+        print('Deleting old shapefiles.')
         for f in gflist:
             os.remove(f)
-        print('Copying GDB.')
+        print('Copying shapefiles.')
         for f in lflist:
-            shutil.copy(f, gdbdir)                
+            shutil.copy(f, shpdir)                
     
 setup(
     # Application name:
-    name='ieo',
+    name = 'ieo',
 
     # Version number:
-    version='1.1.0',
+    version = '1.1.1',
 
     # Application author details:
-    author='Guy Serbin',
+    author = 'Guy Serbin',
 
     license = open('LICENSE').read(),
 
@@ -251,13 +252,20 @@ setup(
     
 #    packages = find_packages(include = ['config', 'data']),
     packages = ['config', 'data'],
-    package_data={'config': ['*',], 'data': ['*',]},
+    package_data = {'config': ['*',], 'data': ['*',]},
     #package_data = {'config': ['*',],}, #  'data': ['*',], 'data/ieo.gdb': ['*',]
     # Dependent packages (distributions)
-    install_requires=[
+    install_requires = [
         'numexpr',
         'numpy',
         'gdal',
         'pillow'
     ],
+    project_urls = {
+        'Documentation': 'https://readthedocs.org/projects/ieo/',
+        #'Funding': 'https://donate.pypi.org',
+        #'Say Thanks!': 'http://saythanks.io/to/example',
+        'Source': 'https://github.com/Teagasc/ieo',
+        'Tracker': 'https://github.com/Teagasc/ieo/issues',
+    },
 )
