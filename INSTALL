@@ -7,16 +7,21 @@ Python. I've specifically used the Continuum Analytics distributions (https://ww
 1. numpy
 2. numexpr (latest version, earlier versions had memory leak issues)
 3. gdal
+4. pillow
 
 How to install them via conda? Simple:
 
-> conda install -c conda-forge numpy numexpr gdal
+> conda install -c conda-forge numpy numexpr gdal pillow
 
 Then hit yes for any additional packages needed.
 
 Then install the Irish Earth Observation (IEO) module (https://github.com/DrGuy/ieo) from the directory in which is resides via:
 
 > python setup.py --install
+
+or via pip:
+
+> pip install ieo
 
 During setup, you will need to input the following information:
 1. Required: the base directory for IEO output data. This will automatically create several subdirectories for you. Subdirectories will be created on a per-satellite basis (currently only Landsat).

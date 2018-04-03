@@ -74,6 +74,13 @@ headerdict['Fmask'].update({
     'defaultbasefilename': '%s_cfmask.dat', # sceneid
     'data ignore value': 255})
 
+headerdict['pixel_qa'] = headerdict['default'].copy()
+headerdict['pixel_qa'].update({
+    'description': 'Landsat Pixel QA Layer %s',  # sceneid
+    'band names': ['Pixel QA %s'], # sceneid
+    'defaultbasefilename': '%s_pixel_qa.dat', # sceneid
+    'data ignore value': 1})
+
 headerdict['Landsat Band6'] = headerdict['default'].copy()
 headerdict['Landsat Band6'].update({
     'description': 'LEDAPS Brightness Temperature (%s)',  # sceneid
@@ -229,7 +236,7 @@ class ENVIfile(object):
                 self.header.sensortype = headerdict['Landsat'][self.SceneID[:3]] 
         elif rastertype != 'Landsat' and rastertype in headerdict.keys():
             self.rastertype = rastertype
-            if rastertype in ['Fmask','NDVI','EVI']:
+            if rastertype in ['Fmask','NDVI','EVI', 'pixel_qa']:
                 if self.SceneID[:1] == 'S':
                     self.header.sensortype = 'Sentinel-2'
                 elif self.SceneID[:1] == 'L':

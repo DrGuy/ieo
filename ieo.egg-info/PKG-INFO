@@ -1,11 +1,14 @@
-Metadata-Version: 1.1
+Metadata-Version: 1.2
 Name: ieo
-Version: 1.1.0
+Version: 1.1.1
 Summary: Irish Earth Observation library.
 Home-page: UNKNOWN
 Author: Guy Serbin
 Author-email: UNKNOWN
 License: This work is licensed under the Creative Commons Attribution 4.0 International License. To view a copy of this license, visit http://creativecommons.org/licenses/by/4.0/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
+Project-URL: Documentation, https://readthedocs.org/projects/ieo/
+Project-URL: Source, https://github.com/Teagasc/ieo
+Project-URL: Tracker, https://github.com/Teagasc/ieo/issues
 Description-Content-Type: UNKNOWN
 Description: # ieo
         Irish Earth Observation (IEO) remote sensing data processing Python module
