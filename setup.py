@@ -75,26 +75,26 @@ if not scb: # build a new config file object
     
     # DEFAULT section
     ieo_config['DEFAULT'] = {}
-    basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')
-    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, pixel_qa, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat')))
+    basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ').strip()
+    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, pixel_qa, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat'))).strip()
     if len(basedir) == 0:
         landsatdir = os.path.join(basedir, 'Landsat')
     for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI', 'pixel_qa']:
         dirname = os.path.join(landsatdir, y)
         ieo_config['DEFAULT'][y] = dirname 
-    y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest'))
+    y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest')).strip()
     if len(y) == 0:
         y = os.path.join(landsatdir, 'Ingest')
     ieo_config['DEFAULT']['ingestdir'] = y
-    archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(basedir, 'archive'))
+    archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(basedir, 'archive')).strip()
     if len(archdir) == 0:
         archdir = os.path.join(basedir, 'archive')
     ieo_config['DEFAULT']['archdir'] = archdir
-    logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(basedir, 'logs'))
+    logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(basedir, 'logs')).strip()
     if len(logdir) == 0:
         logdir = os.path.join(basedir, 'logs')
     ieo_config['DEFAULT']['logdir'] = logdir
-    catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(basedir, 'Catalog'))
+    catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(basedir, 'Catalog')).strip()
     if len(catdir) == 0:
         catdir = os.path.join(basedir, 'Catalog')
         ieo_config['DEFAULT']['catdir'] = catdir
@@ -217,7 +217,7 @@ setup(
     name = 'ieo',
 
     # Version number:
-    version = '1.1.1',
+    version = '1.1.2',
 
     # Application author details:
     author = 'Guy Serbin',

@@ -4,9 +4,9 @@
 # email: guy <dot> serbin <at> teagasc <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.1.1 
+# version 1.1.2 
 
-# This contain code borrowed from the Python GDAL/OGR Cookbook: https://pcjericks.github.io/py-gdalogr-cookbook/
+# This contains code borrowed from the Python GDAL/OGR Cookbook: https://pcjericks.github.io/py-gdalogr-cookbook/
 
 import os, datetime, time, shutil, sys, glob, csv, ENVIfile, numpy, numexpr
 from xml.dom import minidom
@@ -450,12 +450,12 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     # NDVI calculation 
     NDVI = NDindex(NIR, red, fmask = fmask)
     parentrasters = makeparentrastersstring(parentrasters)
-    ENVIfile(NDVI, 'NDVI', outdir = ndvidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters =  parentrasters).Save()
+    ENVIfile(NDVI, 'NDVI', outdir = ndvidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
     NDVI = None
     
     # EVI calculation
     evi = EVI(blue, red, NIR, fmask = fmask)
-    ENVIfile(evi, 'EVI', outdir = evidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters =  parentrasters).Save()
+    ENVIfile(evi, 'EVI', outdir = evidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
     evi = None
     
     NIR = None
@@ -500,6 +500,7 @@ def importespa(f, *args, **kwargs):
     remove = kwargs.get('remove', False)
     useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 1 Product ID rather than old Scene ID
     btimg = None
+    masktype = None
     basename = os.path.basename(f)
     dirname = os.path.dirname(f)
     if basename[2:3] == '0': # This will have to be updated once Landsat 10 launches
@@ -588,21 +589,27 @@ def importespa(f, *args, **kwargs):
         if not os.path.exists(out_raster):  
             print('Reprojecting {} Fmask to {}.'.format(sceneid, projection))
             reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'Fmask')
+        masktype = 'Fmask'
+        if feat.GetField('Fmask_path') != out_raster:
+            feat.SetField('Fmask_path', out_raster)
+        if feat.GetField('MaskType') != masktype:
+            feat.SetField('MaskType', masktype)
     
     # Pixel QA layer
     in_raster = os.path.join(outputdir, '{}_pixel_qa.{}'.format(ProductID, ext))
-    if not os.access(in_raster, os.F_OK):
-        print('Error, Pixel QA file is missing. Returning.')
-        logerror(in_raster, 'Pixel QA file missing.')
-        return
-        
-    if useProdID:
-        out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(ProductID))
-    else:
-        out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(sceneid))
-    if not os.path.isfile(out_raster):  
-        print('Reprojecting {} Pixel QA layer to {}.'.format(sceneid, projection))
-        reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'pixel_qa')    
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):  
+            print('Reprojecting {} Pixel QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'pixel_qa')  
+        masktype = 'Pixel_QA'  
+        if feat.GetField('PixQA_path') != out_raster:
+            feat.SetField('PixQA_path', out_raster)
+        if feat.GetField('MaskType') != masktype:
+            feat.SetField('MaskType', masktype)
     
     # Surface reflectance data
     if useProdID:
@@ -627,11 +634,7 @@ def importespa(f, *args, **kwargs):
             print(p.communicate())
         print('Reprojecting {} reflectance data to {}.'.format(sceneid, projection))
         reproject(out_raster, out_itm, rastertype = 'ref', sceneid = sceneid, parentrasters = srlist)
-        
-        # Update LEDAPS info in shapefile 
-        print('Updating information in shapefile.')
-        feat.SetField('LEDAPS', out_itm)
-        layer.SetFeature(feat)
+        feat.SetField('SR_path', out_itm) # Update LEDAPS info in shapefile 
     
     # Thermal data
     print('Processing thermal data.')
@@ -661,21 +664,33 @@ def importespa(f, *args, **kwargs):
         if not os.path.isfile(BT_ITM): 
             print('Reprojecting {} brightness temperature data to {}.'.format(sceneid, projection))
             reproject(btimg, BT_ITM, rastertype = rastertype, sceneid = sceneid, parentrasters = parentrasters)
+        if feat.GetField('BT_path') != BT_ITM:
+            feat.SetField('BT_path', BT_ITM)
         
-    
     # Calculate EVI and NDVI
     print('Processing vegetation indices.')
     if useProdID:
         evibasefile = '{}_EVI.dat'.format(ProductID)
     else:
         evibasefile = '{}_EVI.dat'.format(sceneid)
-    if not os.path.isfile(os.path.join(evidir, evibasefile)): 
+    evifile = os.path.join(evidir, evibasefile)
+    ndvifile = os.path.join(evidir, evibasefile.replace('_EVI', '_NDVI'))
+    if not os.path.isfile(evifile): 
         try:
             calcvis(out_itm)
         except Exception as e:
             print('An error has occurred calculating VIs for scene {}:'.format(sceneid))
             print(e)
             logerror(out_itm, e)
+    if os.path.isfile(evifile) and feat.GetField('EVI_path') != evifile:
+        feat.SetField('EVI_path', evifile)
+    if os.path.isfile(ndvifile) and feat.GetField('NDVI_path') != ndvifile:
+        feat.SetField('NDVI_path', ndvifile)
+    
+    # Set feature in shapefile to preserve processed file metadata
+    print('Updating information in shapefile.')
+    layer.SetFeature(feat)
+    data_source = None # Close the shapefile
     
     # Clean up files.
     
@@ -696,7 +711,6 @@ def importespa(f, *args, **kwargs):
             print(e)
             logerror(f, e)
     
-    data_source = None # Close the shapefile
     print('Processing complete for scene {}.'.format(sceneid))
         
 
