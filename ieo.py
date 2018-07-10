@@ -147,6 +147,15 @@ def makegrid(*args, **kwargs):
 #        ytilestr = '{:02d}'
 #    else:
 #        ytilestr = '{}'
+    
+    # Create spatial reference if missing or set to something other
+    if not prj or projection != prjstr:
+        spatialRef = osr.SpatialReference()
+        i = projection.find(':') + 1
+        spatialRef.ImportFromEPSG(int(projection[i:]))
+    else:
+        spatialRef = prj
+        
     ytilestr = '{}{}{}'.format('{:0', len(str(ytiles)), 'd}') # limit for ytiles removed
     
     if overwrite:
@@ -173,11 +182,10 @@ def makegrid(*args, **kwargs):
     data_source = driver.CreateDataSource(outfile)
     
     # create the layer
-    layer = data_source.CreateLayer("Tiles", projection, ogr.wkbPolygon)
+    layer = data_source.CreateLayer("Tiles", spatialRef, ogr.wkbPolygon)
     
     # Add fields
     field_name = ogr.FieldDefn("Tile", ogr.OFTString)
-    field_name.SetWidth(2)
     layer.CreateField(field_name)
     
     # create the tiles
@@ -214,17 +222,14 @@ def makegrid(*args, **kwargs):
                 outFeature.SetGeometry(poly)
                 outFeature.SetField('Tile', tilename)
                 layer.CreateFeature(outFeature)
-                outFeature.Destroy
+                outFeature.Destroy()
         if i1 >= 25:
             h += 1
             i1 = 0
         else:    
             i1 += 1
     
-    # Create ESRI.prj file
-    spatialRef = osr.SpatialReference()
-    i = projection.find(':') + 1
-    spatialRef.ImportFromEPSG(int(projection[i:]))
+    # Create ESRI.prj file    
     spatialRef.MorphToESRI()
     with open(outfile.replace('.shp', '.prj'), 'w') as output:
         output.write(spatialRef.ExportToWkt())

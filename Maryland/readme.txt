@@ -1,0 +1,1 @@
+This directory and subdirectory contains sample files for Maryland State Plane/ NAD83 (meters) projection (EPSG:26985).  
