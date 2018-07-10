@@ -259,7 +259,8 @@ setup(
         'numexpr',
         'numpy',
         'gdal',
-        'pillow'
+        'pillow',
+        'requests'
     ],
     project_urls = {
         'Documentation': 'https://readthedocs.org/projects/ieo/',
