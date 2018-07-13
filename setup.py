@@ -183,6 +183,10 @@ for key in ieo_config['DEFAULT'].keys(): # this actually processes some values f
 
 # copy data files to Catalogue directory
 badlistfile = os.path.join(landsatcatdir, 'badlist.txt')
+for d in ['Thumbnails', 'ESPA_processing_lists']:
+    d1 = os.path.join(landsatcatdir, d)
+    if not os.path.isdir(d1):
+        newinidir(d1)
 cpb = False # copy badlist.txt to catdir
 if not os.path.isfile(badlistfile):
     cpb = True
@@ -208,9 +212,9 @@ if cpb:
         print('Deleting old shapefiles.')
         for f in gflist:
             os.remove(f)
-        print('Copying shapefiles.')
-        for f in lflist:
-            shutil.copy(f, shpdir)                
+    print('Copying shapefiles.')
+    for f in lflist:
+        shutil.copy(f, shpdir)                
     
 setup(
     # Application name:
@@ -259,8 +263,7 @@ setup(
         'numexpr',
         'numpy',
         'gdal',
-        'pillow',
-        'requests'
+        'pillow'
     ],
     project_urls = {
         'Documentation': 'https://readthedocs.org/projects/ieo/',
