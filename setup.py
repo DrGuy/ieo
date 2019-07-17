@@ -221,7 +221,7 @@ setup(
     name = 'ieo',
 
     # Version number:
-    version = '2.0',
+    version = '1.2',
 
     # Application author details:
     author = 'Guy Serbin',
@@ -263,7 +263,7 @@ setup(
     install_requires = [
         'numexpr',
         'numpy',
-        'gdal',
+        'gdal>=2',
         'pillow'
     ],
     project_urls = {

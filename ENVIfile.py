@@ -56,6 +56,7 @@ dtype_to_envi = {
 
 headerfields = 'acquisition time,band names,bands,bbl,byte order,class lookup,class names,class values,classes,cloud cover,complex function,coordinate system string,data gain values,data ignore value,data offset values,data reflectance gain values,data reflectance offset values,data type,default bands,default stretch,dem band,dem file,description,file type,fwhm,geo points,header offset,interleave,lines,map info,pixel size,product type,projection info,read procedures,reflectance scale factor,rpc info,samples,security tag,sensor type,solar irradiance,spectra names,sun azimuth,sun elevation,wavelength,wavelength units,x start,y start,z plot average,z plot range,z plot titles'.split(',')
 headerdict = {'default':dict.fromkeys(headerfields)}
+headerdict['default'].update({'parent rasters': []})
 
 headerdict['Fmask'] = headerdict['default'].copy()
 headerdict['Fmask'].update({
@@ -88,8 +89,8 @@ headerdict['Landsat Band6'].update({
     'wavelength': [11.450000],
     'wavelength units': 'Micrometers',
     'fwhm':[2.100000],
-    'defaultbasefilename': '%s_BT.dat' # sceneid
-    }) 
+    'defaultbasefilename': '%s_BT.dat', # sceneid
+    'data ignore value': -9999}) 
 
 headerdict['Landsat TIR'] = headerdict['default'].copy()
 headerdict['Landsat TIR'].update({
@@ -98,8 +99,8 @@ headerdict['Landsat TIR'].update({
     'wavelength': [10.895000, 12.005000],
     'wavelength units': 'Micrometers',
     'fwhm': [0.590000, 1.010000],
-    'defaultbasefilename': '%s_BT.dat' # sceneid
-    }) 
+    'defaultbasefilename': '%s_BT.dat', # sceneid
+    'data ignore value': -9999}) 
 
 headerdict['Landsat TM'] = headerdict['default'].copy()
 headerdict['Landsat TM'].update({
@@ -109,8 +110,8 @@ headerdict['Landsat TM'].update({
     'wavelength units': 'Micrometers',
     'fwhm': [0.070000, 0.080000, 0.060000, 0.130000, 0.200000, 0.270000],
     'default bands': [6, 4, 1],
-    'defaultbasefilename': '%s_ref.dat' # sceneid
-    }) 
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': -9999}) 
 
 headerdict['Landsat ETM+'] = headerdict['default'].copy()
 headerdict['Landsat ETM+'].update({
@@ -120,8 +121,8 @@ headerdict['Landsat ETM+'].update({
     'wavelength units': 'Micrometers',
     'fwhm': [0.070000, 0.080000, 0.060000, 0.120000, 0.200000, 0.260000],
     'default bands': [6, 4, 1],
-    'defaultbasefilename': '%s_ref.dat' # sceneid
-    }) 
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': -9999}) 
 
 headerdict['Landsat OLI'] = headerdict['default'].copy()
 headerdict['Landsat OLI'].update({
@@ -131,8 +132,8 @@ headerdict['Landsat OLI'].update({
     'wavelength units': 'Micrometers',
     'default bands': [7, 5, 2],
     'fwhm': [0.016000, 0.060100, 0.057400, 0.037500, 0.028200, 0.084700, 0.186700],
-    'defaultbasefilename': '%s_ref.dat' # sceneid
-    }) 
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': -9999}) 
     
 headerdict['Landsat MSS'] = headerdict['default'].copy()
 headerdict['Landsat MSS'].update({
@@ -178,6 +179,67 @@ headerdict['Landsat'] = {'LE7': 'Landsat ETM+', 'LT4': 'Landsat TM', 'LT5': 'Lan
 
     
 ## General functions
+
+def readenvihdr(hdr, *args, **kwargs):
+    # started on 16 July 2019
+    # this function will read data from an ENVI header into a local headerdict
+    # includes code shamelessly borrowed from https://github.com/spectralpython/spectral/blob/master/spectral/io/envi.py
+    rastertype = kwargs.get('rastertype', 'default')
+    if not os.path.isfile(hdr):
+        print('Error: the file {} does not exist.'.format(hdr))
+        logerror(hdr, 'Error: HDR file does not exist.')
+        return None
+    else:
+        if not rastertype in headerdict.keys():
+            print('Error, rastertype "{}" is not in the recognised rastertypes of headerdict. Using default settings.'.format(rastertype))
+            logerror(hdr, 'Error, rastertype "{}" is not in the recognised rastertypes of headerdict. Using default settings.'.format(rastertype))
+            rastertype = 'default'
+        hdict = headerdict[rastertype].copy()
+        with open(hdr, 'r') as lines:
+            for line in lines:
+                line = line.strip()
+                line = lines.pop(0) 
+                if line.find('=') == -1: continue
+                if line[0] == ';': continue
+    
+                (key, sep, val) = line.partition('=')
+                key = key.strip()
+#                if not key.islower():
+#                    have_nonlowercase_param = True
+#                    if not support_nonlowercase_params:
+#                        key = key.lower()
+                val = val.strip()
+                if val and val[0] == '{':
+                    str = val.strip()
+                    while str[-1] != '}':
+                        line = lines.pop(0)
+                        if line[0] == ';': continue
+    
+                        str += '\n' + line.strip()
+                    if key == 'description':
+                        hdict[key] = str.strip('{}').strip()
+                    else:
+                        vals = str[1:-1].split(',')
+                        for j in range(len(vals)):
+                            vals[j] = vals[j].strip()
+                        hdict[key] = vals
+                else:
+                    hdict[key] = val
+    return hdict
+
+def isenvifile(f):
+    # started on 16 July 2019
+    # this function determines if a file is an ENVI file type based upon the existence of a .hdr file                  
+    basename = os.path.basename(f)
+    if '.' in basename:
+        i = f.refind('.')
+        hdr = f.replace(f[i:], '.hdr')
+    else:
+        hdr = f + '.hdr'
+    if os.path.isfile(hdr):
+        return hdr
+    else:
+        return None
 
 class ENVIfile(object):
     

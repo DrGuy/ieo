@@ -4,7 +4,8 @@
 # email: guyserbin <at> eoanalytics <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 2.0
+# version 1.2
+
 
 # This contains code borrowed from the Python GDAL/OGR Cookbook: https://pcjericks.github.io/py-gdalogr-cookbook/
 
@@ -322,7 +323,236 @@ def checkscenelocation(scene, dst = 50.0): # This function assesses geolocation 
         misplaced = True
     return misplaced, offset
 
+def world2Pixel(geoMatrix, x, y):
+  """
+  Uses a gdal geomatrix (gdal.GetGeoTransform()) to calculate
+  the pixel location of a geospatial coordinate
+  """
+  ulX = geoMatrix[0]
+  ulY = geoMatrix[3]
+  xDist = geoMatrix[1]
+  yDist = geoMatrix[5]
+  rtnX = geoMatrix[2]
+  rtnY = geoMatrix[4]
+  pixel = int((x - ulX) / xDist)
+  line = int((ulY - y) / xDist)
+  return (pixel, line)
 
+def pixel2world(geoMatrix, pixel, line):
+  """
+  Uses a gdal geomatrix (gdal.GetGeoTransform()) to calculate
+  the pixel location of a geospatial coordinate
+  """
+  ulX = geoMatrix[0]
+  ulY = geoMatrix[3]
+  xDist = geoMatrix[1]
+  yDist = geoMatrix[5]
+  rtnX = geoMatrix[2]
+  rtnY = geoMatrix[4]
+  x = xDist * float(pixel) + ulX
+  y = yDist * float(line) + ulY
+  return (x, y)
+
+
+def converttotiles(infile, outdir, rastertype, *args, **kwargs):
+    # This function converts existing data to NTS tiles
+    # Code addition started on 11 July 2019
+    # includes code from https://gis.stackexchange.com/questions/220844/get-field-names-of-shapefiles-using-gdal
+    inshp = kwargs.get('inshape', landsatshp) #input shapefile containing data inventory
+    tileshp = kwargs.get('tileshp', NTS) 
+    pixelqa = kwargs.get('pixelqa', True) # determines whether to search for Pixel QA of CFmask files
+    ext = kwargs.get('ext', 'dat') # file extension of raster files. Assumes ENVI format
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+    data_source = driver.Open(inshp, 1) # opened with write access as LEDAPS data will be updated
+    layer = data_source.GetLayer()
+    ldefn = layer.GetLayerDefn()
+    schema = [ldefn.GetFieldDefn(n).name for n in range(ldefn.GetFieldCount())]
+    if not 'tiles' in schema: # this will add two fields to the s
+        tilebasefield = ogr.FieldDefn('tilebase', ogr.OFTString)
+        layer.CreateField(tilebasefield)
+        tilesfield = ogr.FieldDefn('tiles', ogr.OFTString)
+        layer.CreateField(tilesfield)
+    indir, inbasename = os.path.split(infile)
+    sceneid = inbasename[:21] # optimised now for Landsat. Must change for IEO 2.0
+    outbasename = '{}_{}_'.format(inbasename[:3], inbasename[9:16])
+    if pixelqa: 
+        pixelqafile = os.path.join(pixelqadir, '{}_pixel_qa.{}'.format(sceneid, ext))
+        if not os.path.isfile(pixelqafile):
+            pixelqafile = os.path.join(fmaskdir, '{}_cfmask.{}'.format(sceneid, ext))
+            if not os.path.isfile(pixelqafile):
+                print('Error: Pixel QA/ cloud mask file missing. Skipping scene.')
+                logerror(sceneid, 'Error: Pixel QA/ cloud mask file missing. Skipping scene.')
+                return
+    if not infile == pixelqafile: # This will ensure that all QA data get saved, regardless of cloud conditions.
+        pixelqadata = maskfromqa(pixelqafile, int(sceneid[2:3]), sceneid, land = True, water = True, snowice = True, usemedcloud = True, usehighcirrus = True, useterrainocclusion = True)        
+    else:
+        pixelqadata = None
+    tile_ds = driver.Open(tileshp, 0)
+    tilelayer = tile_ds.GetLayer()
+    
+    hdr = isenvifile(infile)
+    if hdr:
+        headerdict = readendviheader(hdr)
+    else:
+        headerdict = None
+    
+    src_ds = gdal.Open(infile)
+    gt = src_ds.GetGeoTransform()
+    
+    fieldnamedict = {'Fmask_path' : ['Fmask'],
+        'PixQA_path' : ['pixel_qa'],
+        'BT_path' : ['Landsat TIR', 'Landsat Band6'],
+        'SR_path' : ['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
+        'NDVI_path' : ['NDVI'],
+        'EVI_path' : ['EVI']}
+    fieldname = None
+    for key in fieldnamedict.keys():
+        if rastertype in fieldnamedict[key]:
+            fieldname = key
+            break
+    while not sceneid:
+        feat = layer.GetNextFeature()
+        if sceneid == feat.GetField('sceneID'):
+            for tile in tilelayer:
+                if tile.Intersect(feat):
+                    result = makerastertile(tile, src_ds, gt, outdir, outbasename, infile, rastertype, pixelqadata = pixelqadata, headerdict = headerdict)
+                    if result:  
+                        tilebasestr = feat.GetField('tilebase')
+                        tilestr = feat.GetField('tiles')
+                        tilename = tile.GetField('Tile')
+                        if not tilename in tilestr:
+                            if len(tilestr) == 0:
+                                tilestr = tilename
+                            else:
+                                tilestr += ',{}'.format(tilename)
+                            feat.SetField('tiles', tilestr)
+                        if not tilebasestr == outbasename:
+                            feat.SetField('tilebase', outbasename)
+                        if fieldname:
+                            fieldnamestr = feat.GetField(fieldname)
+                            if not tilename in fieldnamestr:
+                                if len(fieldnamestr) == 0:
+                                    fieldnamestr = fieldname
+                                else:
+                                    fieldnamestr += ',{}'.format(fieldname)
+                                feat.SetField(fieldname, fieldnamestr)
+                        layer.SetFeature(feat)
+    del src_ds
+    del tile_ds
+    del pixelqadata
+    del data_source
+
+
+def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rastertype, *args, **kwargs):
+    # Adapted from IForDEO code starting on 9 July 2019
+    # This function only processes individual tiles, and should be called from another function
+    # raster tile and pixelQA files should be VRTs
+    # optional pixelQA data should be an array of zeroes and ones, where pixels that equal one are included for processing. Valid pixels will be identified as clear land, water, or snow/ice.
+    overwrite = kwargs.get('overwrite', False) # setting this option will delete an existing raster tile
+    update = kwargs.get('update', True) # setting this option will replace pixels with no data with any new data.
+    hdict = kwargs.get('headerdict', None)
+    pixelqadata = kwargs.get('pixelqadata', None)
+    tilename = tile.GetField('Tile')
+    tilegeom = tile.GetGeometryRef()
+    outfile = os.path.join(outdir, '{}_{}.dat'.format(outbasename, tilename))
+    if os.path.isfile(outfile) and not overwrite and not update: # skips this tile if the tile is not to be overwritten or updated.
+        print('The tile {} exists already on disk, and both overwrite and update flags are set to False. Skipping this tile,'.format(os.path.basename(tilename)))
+        return False
+    minX, maxX, minY, maxY = tilegeom.GetEnvelope()
+    geoTrans = (minX, 30, 0.0, maxY, 0.0, -30)
+    cols = int((maxX - minX) / 30) # number of samples or columns
+    rows = int((maxY - minY) / 30) # number of lines or rows
+    bands = src_ds.RasterCount
+    print('Processing tile: {}'.format(tilename))
+    dims = [minX, maxY, maxX, minY]
+    
+    print('Output columns: {}'.format(cols))
+    print('Output rows: {}'.format(rows))
+    # determine extent of tile, etc.   
+    extent = [gt[0], gt[3], gt[0] + gt[1] * src_ds.RasterXSize, gt[3] + gt[5] * src_ds.RasterYSize]
+    #                if checkintersect(tilegeom, extent):
+    ul = [max(dims[0], extent[0]), min(dims[1], extent[1])]
+    lr = [min(dims[2], extent[2]), max(dims[3], extent[3])]
+    px, py = world2Pixel(geoTrans, ul[0], ul[1])
+    if px < 0:
+        px = 0
+    if py < 0:
+        py = 0
+    plx, ply = world2Pixel(geoTrans, lr[0], lr[1])
+    if plx >= extent[0]:
+        plx = extent[0]-1
+    if ply >= extent[1]:
+        ply = extent[1]-1
+    pX, pY = pixel2world(geoTrans, px, py)
+    plX, plY = pixel2world(geoTrans, plx, ply)
+    ulx,uly = world2Pixel(gt, pX, pY)
+    if ulx < 0:
+        ulx = 0
+    lrx,lry = world2Pixel(gt, plX, plY)
+    if lrx >= src_ds.RasterXSize:
+        lrx = src_ds.RasterXSize - 1 
+    if uly >= src_ds.RasterYSize:
+        uly = src_ds.RasterYSize - 1
+    if lry < 0:
+        lry = 0 
+    
+    dx = plx-px + 1
+    dy = ply-py + 1
+    if pixelqadata:
+        pixelqatile = pixelqadata[uly:dy - 1, ulx:dx - 1]
+    else:
+        pixelqatile = numpy.ones((rows, cols), dtype = numpy.int8)
+    
+    if 1 in pixelqatile: # determine if there are usable pixels in tile area
+        print('Subsetting raster data for tile: {}'.format(tilename))
+        # Get the type of the data
+        gdal_dt = src_ds.GetRasterBand(1).DataType
+        if gdal_dt == gdal.GDT_Byte:
+            dt = 'uint8'
+        elif gdal_dt == gdal.GDT_Int16:
+            dt = 'int16'
+        elif gdal_dt == gdal.GDT_UInt16:
+            dt = 'uint16'
+        elif gdal_dt == gdal.GDT_Int32:
+            dt = 'int32'
+        elif gdal_dt == gdal.GDT_UInt32:
+            dt = 'uint32'
+        elif gdal_dt == gdal.GDT_Float32:
+            dt = 'float32'
+        elif gdal_dt == gdal.GDT_Float64:
+            dt = 'float64'
+        elif gdal_dt == gdal.GDT_CInt16 or gdal_dt == gdal.GDT_CInt32 or gdal_dt == gdal.GDT_CFloat32 or gdal_dt == gdal.GDT_CFloat64 :
+            dt = 'complex64'
+        else:
+            print('Error: Data type unknown')
+            logerror(outbasename, 'Error: Data type unknown')
+            return False
+        shape = (bands, rows, cols)
+        outtile = numpy.full(shape, headerdict[rastertype]['no data value'], dtype = dt)
+        if os.path.isfile(outfile):
+            out_ds = gdal.Open(outfile)
+#            outheaderdict = readheader(outfile.replace('.dat', '.hdr'))
+#        else:
+#            outheaderdict = headerdict['default'].copy()
+        for i in range(bands):
+            if os.path.isfile(outfile):
+                band = out_ds.GetRasterBand(i + 1).ReadAsArray()
+            else:
+                band = numpy.full(shape, headerdict[rastertype]['no data value'], dtype = dt)
+            band[pixelqatile == 1 and pixelqatile != headerdict[rastertype]['no data value']] = src_ds.GetRasterBand(i + 1).ReadAsArray(ulx, uly, dx - 1, dy - 1)
+            outtile[i, :, :] = band
+            band = None                
+            
+    del out_ds # close tile before it gets overwritten, if open
+#    if not inrastername in headerdict['parent rasters']:
+#        headerdict['parent rasters'].append(inrastername)
+    ENVIfile(outtile, 'tile', geoTrans = gt, headerdict = hdict, acqtime = hdict['acquisition time'], outfilename = outfile, parentrasters = inrastername, rastertype = rastertype).Save()
+    del outtile
+    del band
+    del pixelqatile
+    return True
+
+    
 ## Landsat import and VI calculation functions
 
 def envihdracqtime(hdr):
