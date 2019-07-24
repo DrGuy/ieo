@@ -530,7 +530,10 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     parentrasters = makeparentrastersstring([os.path.basename(inrastername)])
     if rastertype in ['ref', 'BT']:
         print('SceneID = {}'.format(SceneID))
-        hdtype = headerdict['Landsat'][SceneID[:3]][rastertype]
+        if SceneID[2:3] == '8':
+            hdtype = headerdict['Landsat'][SceneID[:3]][rastertype]
+        else:
+            hdtype = headerdict['Landsat'][SceneID[:3]]
     else:
         hdtype = rastertype
     ndval = headerdict[hdtype]['data ignore value']
