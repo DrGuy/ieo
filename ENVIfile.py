@@ -78,7 +78,7 @@ headerdict['Fmask'].update({
 headerdict['pixel_qa'] = headerdict['default'].copy()
 headerdict['pixel_qa'].update({
     'description': 'Landsat Pixel QA Layer %s',  # sceneid
-    'band names': ['Pixel QA %s'], # sceneid
+    'band names': ['Pixel QA'], # sceneid
     'defaultbasefilename': '%s_pixel_qa.dat', # sceneid
     'data ignore value': 1})
 
@@ -198,7 +198,6 @@ def readenvihdr(hdr, *args, **kwargs):
         with open(hdr, 'r') as lines:
             for line in lines:
                 line = line.strip()
-                line = lines.pop(0) 
                 if line.find('=') == -1: continue
                 if line[0] == ';': continue
     
@@ -232,7 +231,7 @@ def isenvifile(f):
     # this function determines if a file is an ENVI file type based upon the existence of a .hdr file                  
     basename = os.path.basename(f)
     if '.' in basename:
-        i = f.refind('.')
+        i = f.rfind('.')
         hdr = f.replace(f[i:], '.hdr')
     else:
         hdr = f + '.hdr'
@@ -411,7 +410,7 @@ class ENVIfile(object):
                 self.header.dict = headerdict['default'].copy()
         elif 'ready' in self.header.dict.keys():
             if self.header.dict['ready']:
-                ready = True
+                ready = self.header.dict['ready']
         
         if not self.header.description:
             if ready:
@@ -491,8 +490,12 @@ class ENVIfile(object):
             dataignore = self.header.dict['data ignore value']
         if dataignore:
             if self.header.datatypeval >= 4 and self.header.datatypeval <= 9:
+                if isinstance(dataignore, str):
+                    dataignore = float(dataignore)
                 self.header.dataignorevalue = 'data ignore value = %f\n'%dataignore
             else:
+                if isinstance(dataignore, str):
+                    dataignore = int(dataignore)
                 self.header.dataignorevalue = 'data ignore value = %d\n'%dataignore
         
         if self.header.defaultbands and not 'default bands = ' in self.header.defaultbands:
@@ -527,7 +530,10 @@ class ENVIfile(object):
         
     def Save(self):
         print('Writing raster to disk: %s'%self.file.outfilename)
-        bufsize = self.file.data.shape[0] * self.file.data.shape[1] * self.file.data.dtype.itemsize
+        if len(self.file.data.shape) == 2:
+            bufsize = self.file.data.shape[0] * self.file.data.shape[1] * self.file.data.dtype.itemsize
+        else:
+            bufsize = self.file.data.shape[1] * self.file.data.shape[2] * self.file.data.dtype.itemsize
         with open(self.file.outfilename, 'wb', bufsize) as fout:
             fout.write(self.file.data.tostring())
         self.WriteHeader()
@@ -557,11 +563,14 @@ class ENVIfile(object):
             
             def datadims(self):
                 dims = self.file.data.shape
-                self.header.lines = 'lines = %d\n'%dims[0]
-                self.header.samples = 'samples = %d\n'%dims[1]
+                
                 if len(dims) == 3:
-                    self.header.bands = 'bands = %d\n'%dims[2]
+                    self.header.bands = 'bands = %d\n'%dims[0]
+                    self.header.lines = 'lines = %d\n'%dims[1]
+                    self.header.samples = 'samples = %d\n'%dims[2]
                 else:
+                    self.header.lines = 'lines = %d\n'%dims[0]
+                    self.header.samples = 'samples = %d\n'%dims[1]
                     self.header.bands = 'bands = 1\n'
                 # print(self.data.dtype)
                 self.header.datatypeval = int(dtype_to_envi[str(self.file.data.dtype)])

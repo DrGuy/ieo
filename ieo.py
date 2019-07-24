@@ -130,6 +130,20 @@ def get_landsat_fileparams(filename):
         yearmonthday = time.strftime('%Y%m%d', datetuple)
     return landsat, path, row, year, julian, yearmonthday
 
+def getbadlist(*args, **kwargs):
+    badlistfile = kwargs.get('badlist', badlandsat)
+    badlist = []
+    if os.path.isfile(badlistfile):
+        with open(badlistfile, 'r') as lines:
+            for line in lines:
+                if len(line) >= 7:
+                    badlist.append(line.rstrip())
+    else:
+        print('ERROR: file not found: {}'.format(badlistfile))
+        logerror(badlistfile, 'File not found.')
+    return badlist
+
+
 def makegrid(*args, **kwargs):
     import string
     minX = kwargs.get('minX', float(config['makegrid']['minX']))
@@ -300,7 +314,7 @@ def checkscenelocation(scene, dst = 50.0): # This function assesses geolocation 
     driver = ogr.GetDriverByName("ESRI Shapefile")
 #    gdb, wrs = os.path.split(polygon)
     ds = driver.Open(polygon, 0)
-    layer = ds.Getlayer()
+    layer = ds.GetLayer()
     found = False
     while not found:
         feature = layer.GetNextFeature()
@@ -361,7 +375,28 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     inshp = kwargs.get('inshape', landsatshp) #input shapefile containing data inventory
     tileshp = kwargs.get('tileshp', NTS) 
     pixelqa = kwargs.get('pixelqa', True) # determines whether to search for Pixel QA of CFmask files
+    rewriteheader = kwargs.get('rewriteheader', True)
+    overwrite = kwargs.get('overwrite', True) # overwrite existing files without updating, deleting any tiles first.
+    noupdate = kwargs.get('noupdate', False) # if set to True, will not update existing tiles with new data.
     ext = kwargs.get('ext', 'dat') # file extension of raster files. Assumes ENVI format
+    acqtime = None
+    sceneids = []
+    if infile.endswith('.vrt'):
+        with open(infile, 'r') as lines:
+            for line in lines:
+                if 'SourceFilename' in line:
+                    i = line.find('>') + 1
+                    j = line.rfind('<')
+                    fname = line[i:j]
+                    sceneids.append(os.path.basename(fname)[:21])
+                    if not acqtime:
+                        acqtime = envihdracqtime(line[i:j].replace('.dat', '.hdr'))
+                    
+    else:
+        try:
+            acqtime = envihdracqtime(infile.replace('.{}'.format(ext), '.hdr'))
+        except:
+            acqtime = None
     driver = ogr.GetDriverByName("ESRI Shapefile")
     data_source = driver.Open(inshp, 1) # opened with write access as LEDAPS data will be updated
     layer = data_source.GetLayer()
@@ -374,35 +409,40 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
         layer.CreateField(tilesfield)
     indir, inbasename = os.path.split(infile)
     sceneid = inbasename[:21] # optimised now for Landsat. Must change for IEO 2.0
-    outbasename = '{}_{}_'.format(inbasename[:3], inbasename[9:16])
-    if pixelqa: 
-        pixelqafile = os.path.join(pixelqadir, '{}_pixel_qa.{}'.format(sceneid, ext))
-        if not os.path.isfile(pixelqafile):
-            pixelqafile = os.path.join(fmaskdir, '{}_cfmask.{}'.format(sceneid, ext))
-            if not os.path.isfile(pixelqafile):
-                print('Error: Pixel QA/ cloud mask file missing. Skipping scene.')
-                logerror(sceneid, 'Error: Pixel QA/ cloud mask file missing. Skipping scene.')
-                return
-    if not infile == pixelqafile: # This will ensure that all QA data get saved, regardless of cloud conditions.
-        pixelqadata = maskfromqa(pixelqafile, int(sceneid[2:3]), sceneid, land = True, water = True, snowice = True, usemedcloud = True, usehighcirrus = True, useterrainocclusion = True)        
-    else:
-        pixelqadata = None
+    outbasename = '{}_{}'.format(inbasename[:3], inbasename[9:16])
+    
     tile_ds = driver.Open(tileshp, 0)
     tilelayer = tile_ds.GetLayer()
     
-    hdr = isenvifile(infile)
-    if hdr:
-        headerdict = readendviheader(hdr)
-    else:
-        headerdict = None
+#    hdr = isenvifile(infile)
+#    if hdr:
+#        headerdict = readenvihdr(hdr)
+#    else:
+#        headerdict = None
+#    
+#    headerdict['ready'] = True
     
     src_ds = gdal.Open(infile)
     gt = src_ds.GetGeoTransform()
     
+    # create scene geometry polygon
+    minX = gt[0]
+    maxY = gt[3]
+    maxX = gt[0] + gt[1] * src_ds.RasterXSize
+    minY = gt[3] + gt[5] * src_ds.RasterYSize
+    ring = ogr.Geometry(ogr.wkbLinearRing)
+    ring.AddPoint(minX, maxY)
+    ring.AddPoint(maxX, maxY)
+    ring.AddPoint(maxX, minY)
+    ring.AddPoint(minX, minY)
+    ring.AddPoint(minX, maxY)
+    rasterGeometry = ogr.Geometry(ogr.wkbPolygon)
+    rasterGeometry.AddGeometry(ring)
+    
     fieldnamedict = {'Fmask_path' : ['Fmask'],
         'PixQA_path' : ['pixel_qa'],
-        'BT_path' : ['Landsat TIR', 'Landsat Band6'],
-        'SR_path' : ['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
+        'BT_path' : ['BT'], #['Landsat TIR', 'Landsat Band6'],
+        'SR_path' : ['ref'], #['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
         'NDVI_path' : ['NDVI'],
         'EVI_path' : ['EVI']}
     fieldname = None
@@ -410,26 +450,53 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
         if rastertype in fieldnamedict[key]:
             fieldname = key
             break
-    while not sceneid:
+    found = False
+    while not found:
         feat = layer.GetNextFeature()
-        if sceneid == feat.GetField('sceneID'):
+        if len(sceneids) > 0:
+            sid = sceneids[0]
+        else:
+            sid = sceneid
+        if sid == feat.GetField('sceneID'):
+            found = True
+            #featgeom = feat.GetGeometryRef()
+#            print('Found record for SceneID: {}.'.format(sceneid))
+#            print(feat.GetField('sceneID'))
             for tile in tilelayer:
-                if tile.Intersect(feat):
-                    result = makerastertile(tile, src_ds, gt, outdir, outbasename, infile, rastertype, pixelqadata = pixelqadata, headerdict = headerdict)
+                tilegeom = tile.GetGeometryRef()
+                tilename = tile.GetField('Tile')
+#                print(tilename)
+#                print(tilegeom.Intersect(featgeom))
+                if tilegeom.Intersect(rasterGeometry) and not sceneid[9:16] in getbadlist():
+                    if pixelqa:
+                        basedir = os.path.dirname(outdir)
+                        tileqafile = os.path.join(os.path.join(basedir, 'pixel_qa'), '{}_{}.dat'.format(outbasename, tilename))
+                        pixelqadata = gettileqamask(tileqafile, sid, land = True, water = True, snowice = True, usemedcloud = True, usehighcirrus = True, useterrainocclusion = True)
+                    else: 
+                        pixelqadata = None
+                    print('Now creating tile {} of type {} for SceneID {}.'.format(tilename, rastertype, sid))
+#                    print(headerdict['description'])
+                    try:
+                        result = makerastertile(tile, src_ds, gt, outdir, outbasename, infile, rastertype, pixelqadata = pixelqadata, SceneID = sid, rewriteheader = rewriteheader, acqtime = acqtime, noupdate = noupdate, overwrite = overwrite)
+                    except Exception as e:
+                        logerror(outbasename, e)
+                        print('ERROR: {}: {}'.format(outbasename, e))
+                        result = False
                     if result:  
                         tilebasestr = feat.GetField('tilebase')
                         tilestr = feat.GetField('tiles')
-                        tilename = tile.GetField('Tile')
-                        if not tilename in tilestr:
-                            if len(tilestr) == 0:
-                                tilestr = tilename
-                            else:
-                                tilestr += ',{}'.format(tilename)
-                            feat.SetField('tiles', tilestr)
+                        
+                        if not tilestr:
+                            tilestr = tilename
+                        else:
+                            tilestr += ',{}'.format(tilename)
+                        feat.SetField('tiles', tilestr)
                         if not tilebasestr == outbasename:
                             feat.SetField('tilebase', outbasename)
                         if fieldname:
                             fieldnamestr = feat.GetField(fieldname)
+                            if not fieldnamestr:
+                                fieldnamestr = ''
                             if not tilename in fieldnamestr:
                                 if len(fieldnamestr) == 0:
                                     fieldnamestr = fieldname
@@ -450,11 +517,24 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     # optional pixelQA data should be an array of zeroes and ones, where pixels that equal one are included for processing. Valid pixels will be identified as clear land, water, or snow/ice.
     overwrite = kwargs.get('overwrite', False) # setting this option will delete an existing raster tile
     update = kwargs.get('update', True) # setting this option will replace pixels with no data with any new data.
-    hdict = kwargs.get('headerdict', None)
-    pixelqadata = kwargs.get('pixelqadata', None)
+#    hdict = kwargs.get('headerdict', None)
+    pixelqatile = kwargs.get('pixelqadata', None)
+    SceneID = kwargs.get('SceneID', None)
+    rewriteheader = kwargs.get('rewriteheader', True)
+    acqtime = kwargs.get('acqtime', None)
+    noupdate = kwargs.get('noupdate', False) # This will prevent the function from updating the tile with new data
+    overwrite = kwargs.get('overwrite', False) # This will delete any existing tile data
     tilename = tile.GetField('Tile')
     tilegeom = tile.GetGeometryRef()
     outfile = os.path.join(outdir, '{}_{}.dat'.format(outbasename, tilename))
+    parentrasters = makeparentrastersstring([os.path.basename(inrastername)])
+    if rastertype in ['ref', 'BT']:
+        print('SceneID = {}'.format(SceneID))
+        hdtype = headerdict['Landsat'][SceneID[:3]][rastertype]
+    else:
+        hdtype = rastertype
+    ndval = headerdict[hdtype]['data ignore value']
+    print('hdtype = {}, data ignore value = {}'.format(hdtype, ndval))
     if os.path.isfile(outfile) and not overwrite and not update: # skips this tile if the tile is not to be overwritten or updated.
         print('The tile {} exists already on disk, and both overwrite and update flags are set to False. Skipping this tile,'.format(os.path.basename(tilename)))
         return False
@@ -466,13 +546,18 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     print('Processing tile: {}'.format(tilename))
     dims = [minX, maxY, maxX, minY]
     
-    print('Output columns: {}'.format(cols))
-    print('Output rows: {}'.format(rows))
+#    print('Output columns: {}'.format(cols))
+#    print('Output rows: {}'.format(rows))
     # determine extent of tile, etc.   
     extent = [gt[0], gt[3], gt[0] + gt[1] * src_ds.RasterXSize, gt[3] + gt[5] * src_ds.RasterYSize]
     #                if checkintersect(tilegeom, extent):
     ul = [max(dims[0], extent[0]), min(dims[1], extent[1])]
     lr = [min(dims[2], extent[2]), max(dims[3], extent[3])]
+#    print('raster ul:')
+#    print(ul)
+#    print('raster lr:')
+#    print(lr)
+#    print('Tile coordinates (minX, maxY, maxX, minY): {}, {}, {}, {}'.format(minX, maxY, maxX, minY))
     px, py = world2Pixel(geoTrans, ul[0], ul[1])
     if px < 0:
         px = 0
@@ -498,12 +583,26 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     
     dx = plx-px + 1
     dy = ply-py + 1
-    if pixelqadata:
-        pixelqatile = pixelqadata[uly:dy - 1, ulx:dx - 1]
-    else:
+#    print('ulx = {}, uly = {}, dx = {}, dy = {}.'.format(ulx, uly, dx - 1, dy - 1))
+#    print('plx = {}, ply = {}, px = {}, py = {}.'.format(plx, ply, px, py))
+#    if isinstance(pixelqadata, numpy.ndarray):
+#        pixelqatile = pixelqadata[uly:dy - 1, ulx:dx - 1]
+#        print(pixelqatile.shape)
+#    else:
+    if not isinstance(pixelqatile, numpy.ndarray):
         pixelqatile = numpy.ones((rows, cols), dtype = numpy.int8)
     
     if 1 in pixelqatile: # determine if there are usable pixels in tile area
+#        if bands > 1:
+#            p = Popen(['gdal_translate', '-of', 'ENVI', '-projwin', str(minX), str(maxY), str(maxX), str(minY), inrastername, outfile])
+#            print(p.communicate())
+#            if rewriteheader:
+#                if isinstance(parentrasters, list):
+#                    parentrasters = makeparentrastersstring(parentrasters)
+#                ENVIfile(outfile, rastertype, SceneID = SceneID, outdir = outdir, parentrasters = parentrasters).WriteHeader()
+#            
+#        else:
+#        print(pixelqatile.shape)
         print('Subsetting raster data for tile: {}'.format(tilename))
         # Get the type of the data
         gdal_dt = src_ds.GetRasterBand(1).DataType
@@ -527,29 +626,69 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
             print('Error: Data type unknown')
             logerror(outbasename, 'Error: Data type unknown')
             return False
-        shape = (bands, rows, cols)
-        outtile = numpy.full(shape, headerdict[rastertype]['no data value'], dtype = dt)
+    #        print('data type = {}'.format(dt))
+        if bands > 1:
+            bandarr = []
+    #            shape = (bands, rows, cols)
+    #        else:
+        shape = (rows, cols)
+        
+        outtile = numpy.full(shape, ndval, dtype = dt)
+        
         if os.path.isfile(outfile):
-            out_ds = gdal.Open(outfile)
-#            outheaderdict = readheader(outfile.replace('.dat', '.hdr'))
-#        else:
-#            outheaderdict = headerdict['default'].copy()
+            if noupdate:
+                print('noupdate has been set to True, skipping file.')
+                return False
+            elif overwrite:
+                print('Deleting existing tile.')
+                os.remove(outfile)
+            else:
+                out_ds = gdal.Open(outfile)
+    #            outheaderdict = readheader(outfile.replace('.dat', '.hdr'))
+    #        else:
+    #            outheaderdict = headerdict['default'].copy()
         for i in range(bands):
             if os.path.isfile(outfile):
                 band = out_ds.GetRasterBand(i + 1).ReadAsArray()
             else:
-                band = numpy.full(shape, headerdict[rastertype]['no data value'], dtype = dt)
-            band[pixelqatile == 1 and pixelqatile != headerdict[rastertype]['no data value']] = src_ds.GetRasterBand(i + 1).ReadAsArray(ulx, uly, dx - 1, dy - 1)
-            outtile[i, :, :] = band
-            band = None                
+                band = numpy.full((rows, cols), ndval, dtype = dt)
+            tiledata = numpy.full((rows, cols), ndval, dtype = dt)
+            tiledata[py:ply, px:plx] = src_ds.GetRasterBand(i + 1).ReadAsArray(ulx, uly, dx - 1, dy - 1)
+    #            print('pixelqatile shape:')
+    #            print(pixelqatile.shape)
+    #            print('tiledata shape:')
+    #            print(tiledata.shape)
+            band[numexpr.evaluate("((pixelqatile == 1) & (tiledata != ndval))")] = tiledata[numexpr.evaluate("((pixelqatile == 1) & (tiledata != ndval))")]
+            if bands > 1:
+                bandarr.append(band)
+            else:
+                outtile = band
             
-    del out_ds # close tile before it gets overwritten, if open
-#    if not inrastername in headerdict['parent rasters']:
-#        headerdict['parent rasters'].append(inrastername)
-    ENVIfile(outtile, 'tile', geoTrans = gt, headerdict = hdict, acqtime = hdict['acquisition time'], outfilename = outfile, parentrasters = inrastername, rastertype = rastertype).Save()
-    del outtile
-    del band
-    del pixelqatile
+            band = None   
+    #                indata = None
+            tiledata = None             
+        
+        if bands > 1:
+            outtile = numpy.stack(bandarr)
+            bandarr = None
+        out_ds = None # close tile before it gets overwritten, if open
+    #    if not inrastername in headerdict['parent rasters']:
+    #        headerdict['parent rasters'].append(inrastername)
+        print('Writing to disk: {}'.format(outfile))
+#        print(outtile.shape)
+        ENVIfile(outtile, rastertype, geoTrans = geoTrans, outfilename = outfile, parentrasters = parentrasters, SceneID = SceneID, acqtime = acqtime).Save()
+    #    p = Popen(['gdal_translate', '-projwin', extent[0], extent[1], extent[2], extent[3], '-of', 'ENVI', in_raster, out_raster])
+    #    print(p.communicate())
+    #    if rewriteheader:
+    #        if isinstance(parentrasters, list):
+    #            parentrasters = makeparentrastersstring(parentrasters)
+    #        ENVIfile(outfilename, rastertype, SceneID = sceneid, outdir = outdir, parentrasters = parentrasters).WriteHeader()
+        print('Tile has been written to disk')
+    else:
+        print('No useful pixels in tile, skipping.')
+    outtile = None
+    band = None
+    pixelqatile = None
     return True
 
     
@@ -620,6 +759,34 @@ def maskfromqa(qafile, landsat, sceneid, *args, **kwargs):
     qalayer = None
     qaobj = None
     return mask
+
+
+def gettileqamask(f, sceneid, *args, **kwargs):
+    # started on 24 July 2019
+    # This function identifies will get Pixel QA data for a specific NRT tile 
+    land = kwargs.get('land', qaland) # Include land pixels
+    water = kwargs.get('water', qawater) # Include water pixels
+    snow = kwargs.get('snowice', qasnow) # Include snow/ice pixels
+    shadow = kwargs.get('shadow', qashadow) # Include cloud shadowed pixels
+    usemedcloud = kwargs.get('usemedcloud', qausemedcloud) # Allow medium confidence cloud pixels to be treated as clear
+    usemedcirrus = kwargs.get('usemedcirrus', qausemedcirrus) # Allow medium confidence cirrus pixels to be treated as clear
+    usehighcirrus = kwargs.get('usehighcirrus', qausehighcirrus) # Allow high confidence cirrus pixels to be treated as clear
+    useterrainocclusion = kwargs.get('useterrainocclusion', qauseterrainocclusion) # Allow terrain-occluded pixels to be treated as clear
+
+    if usehighcirrus:
+        usemedcirrus = True
+        
+#    pixelqadata = None
+    
+    if not os.path.isfile(f):
+        dirname, basename = os.path.split(f)
+        f = os.path.join(dirname.replace('pixel_qa', 'Fmask'), basename)
+        if not os.path.isfile(f):
+            print('Error: Pixel QA/ cloud mask file missing. Skipping scene.')
+            logerror(f, 'Error: Pixel QA/ cloud mask file missing. Skipping scene.')
+            return None
+    print('Now creating good pixel mask using cloud mask file: {}'.format(f))
+    return maskfromqa(f, int(os.path.basename(f)[2:3]), sceneid, land = land, water = water, snowice = snow, usemedcloud = usemedcloud, usemedcirrus = usemedcirrus, usehighcirrus = usehighcirrus, useterrainocclusion = useterrainocclusion, shadow = shadow) #
 
 
 def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
