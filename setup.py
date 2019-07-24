@@ -45,7 +45,7 @@ if os.path.isfile(sampleconfig):
 
 # check to see if either sample_ieo.ini or ieo.ini are up to date
 scb = False # Boolean flag, if set to True, copy sample_ieo.ini to ieo.ini
-sc = '' 
+sc = ''
 if updatedini:
     sc = input('An updated ieo.ini was found. Do you wish to use this file as is (DEFAULT = "N")? (y/N): ')
     if sc.lower() == 'y' or sc.lower == 'yes':
@@ -65,14 +65,14 @@ if sconfig and not scb:
         scb = True
 
 
-lcatdir = os.path.join(os.path.dirname(__file__), 'catalog') 
+lcatdir = os.path.join(os.path.dirname(__file__), 'catalog')
 ldatadir = os.path.join(os.path.dirname(__file__), 'data')
 #lgdb = os.path.join(ldatadir, 'ieo.gdb')
 
 if not scb: # build a new config file object
     ieo_config = configparser.ConfigParser()
     print('Now creating a new ieo.ini with custom input.')
-    
+
     # DEFAULT section
     ieo_config['DEFAULT'] = {}
     basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ').strip()
@@ -81,7 +81,7 @@ if not scb: # build a new config file object
         landsatdir = os.path.join(basedir, 'Landsat')
     for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI', 'pixel_qa']:
         dirname = os.path.join(landsatdir, y)
-        ieo_config['DEFAULT'][y] = dirname 
+        ieo_config['DEFAULT'][y] = dirname
     y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest')).strip()
     if len(y) == 0:
         y = os.path.join(landsatdir, 'Ingest')
@@ -98,9 +98,9 @@ if not scb: # build a new config file object
     if len(catdir) == 0:
         catdir = os.path.join(basedir, 'Catalog')
         ieo_config['DEFAULT']['catdir'] = catdir
-    
+
 #    ieo_config['DEFAULT']['GDBname'] = 'ieo.gdb'
-    
+
     useProductID = input('Use 40 character Landsat Product ID for output files, rather than the default 21 character Scene IDs? (y/ N): ')
     if not (useProductID.lower() == 'yes' or useProductID.lower() == 'y'):
         useProductID = 'No'
@@ -128,7 +128,7 @@ if not scb: # build a new config file object
     if len(y) == 0:
         y = 'AIRT'
     ieo_config['VECTOR']['nationaltilesystem'] = 'AIRT'
-    
+
     # Projection section
     ieo_config['Projection'] = {}
     y = input('Please input the projection code, including "EPSG:" (will use "EPSG:2157" if not set): ')
@@ -164,7 +164,7 @@ if not scb: # build a new config file object
     ieo_config['makegrid']['xtiles'] = y
     y = input('Please input the number of ytiles for the local tile system grid (will use 15 if not set): ')
     if len(y) == 0:
-        y = '15' 
+        y = '15'
     ieo_config['makegrid']['ytiles'] = y
     ieo_config.write(ini)
 else:
@@ -175,7 +175,7 @@ else:
 landsatcatdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'Landsat')
 basebasedir = os.path.dirname(basedir)
 
-# Create missing directories on disk 
+# Create missing directories on disk
 for d in [basebasedir, basedir, landsatdir, ieo_config['DEFAULT']['catdir'], landsatcatdir]:
     newinidir(d)
 for key in ieo_config['DEFAULT'].keys(): # this actually processes some values for the second time, but does nothing if the directories exist
@@ -214,14 +214,14 @@ if cpb:
             os.remove(f)
     print('Copying shapefiles.')
     for f in lflist:
-        shutil.copy(f, shpdir)                
-    
+        shutil.copy(f, shpdir)
+
 setup(
     # Application name:
     name = 'ieo',
 
     # Version number:
-    version = '1.1.2',
+    version = '1.2',
 
     # Application author details:
     author = 'Guy Serbin',
@@ -245,6 +245,7 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
         'Topic :: Scientific/Engineering :: GIS'
     ],
 
@@ -253,7 +254,7 @@ setup(
     # Usage is 'download_espa_order.py' not 'python download_espa_order.py'
     scripts = ['ieo.py', 'ENVIfile.py'],
 #    include_package_data = True,
-    
+
 #    packages = find_packages(include = ['config', 'data']),
     packages = ['config', 'data'],
     package_data = {'config': ['*',], 'data': ['*',]},
@@ -262,14 +263,14 @@ setup(
     install_requires = [
         'numexpr',
         'numpy',
-        'gdal',
+        'gdal>=2',
         'pillow'
     ],
     project_urls = {
         'Documentation': 'https://readthedocs.org/projects/ieo/',
         #'Funding': 'https://donate.pypi.org',
         #'Say Thanks!': 'http://saythanks.io/to/example',
-        'Source': 'https://github.com/Teagasc/ieo',
-        'Tracker': 'https://github.com/Teagasc/ieo/issues',
+        'Source': 'https://github.com/DrGuy/ieo',
+        'Tracker': 'https://github.com/DrGuy/ieo/issues',
     },
 )
