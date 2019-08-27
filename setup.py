@@ -221,7 +221,7 @@ setup(
     name = 'ieo',
 
     # Version number:
-    version = '1.2',
+    version = '1.3',
 
     # Application author details:
     author = 'Guy Serbin',
