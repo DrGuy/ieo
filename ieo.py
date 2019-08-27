@@ -1296,7 +1296,7 @@ def importespatotiles(f, *args, **kwargs):
     tdir = os.path.join(outputdir, projacronym)
     if not os.path.isdir(tdir):
         os.mkdir(tdir)
-    if filelist == 0 or len(filelist) == 0:
+    if isinstance(filelist, int) or len(filelist) == 0:
         print('ERROR: there is a problem with the files, skipping.')
         if len(filelist) == 0:
             logerror(f, 'No files found.')
