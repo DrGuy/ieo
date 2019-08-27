@@ -1,4 +1,11 @@
 #/usr/bin/python
+# By Guy Serbin, EOanalytics Ltd.
+# Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
+# email: guyserbin <at> eoanalytics <dot> ie
+
+# Irish Earth Observation (IEO) Python Module
+# version 1.3
+
 import os, sys, shutil, datetime
 from osgeo import osr
 from pkg_resources import resource_stream, resource_string, resource_filename, Requirement

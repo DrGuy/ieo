@@ -1,4 +1,11 @@
 #!/usr/bin/env python
+# By Guy Serbin, EOanalytics Ltd.
+# Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
+# email: guyserbin <at> eoanalytics <dot> ie
+
+# Irish Earth Observation (IEO) Python Module
+# version 1.3
+
 import os, sys, shutil, glob
 from setuptools import setup, find_packages
 
@@ -107,11 +114,12 @@ if not scb: # build a new config file object
     ieo_config['DEFAULT']['useProductID'] = useProductID
     # right now these are filled wil IEO defaults. I will write a customisable installer for the upcoming sections later
     # VECTOR section
+    
     ieo_config['VECTOR'] = {}
-    y = input('Please input the base filename for the Landsat scene catalogue shapefile (will use WRS2_Ireland_scenes.shp if not set): ')
+    y = input('Please input the base filename for the generic geodata geopackage (will use "ieo.gpkg" if not set): ')
     if len(y) == 0:
-        y = 'WRS2_Ireland_scenes.shp'
-    ieo_config['VECTOR']['landsatshp'] = y
+        y = 'ieo.gpkg'
+    ieo_config['catalog']['ieogpkg'] = y
     y = input('Please input the layer name for the generic Landsat WRS-1 scene polygons (will use Ireland_WRS1_Landsat_1_3_ITM if not set): ')
     if len(y) == 0:
         y = 'Ireland_WRS1_Landsat_1_3_ITM'
@@ -128,6 +136,16 @@ if not scb: # build a new config file object
     if len(y) == 0:
         y = 'AIRT'
     ieo_config['VECTOR']['nationaltilesystem'] = 'AIRT'
+    
+    ieo_config['catalog'] = {}
+    y = input('Please input the base filename for the scene catalogue geopackage (will use "catalog.gpkg" if not set): ')
+    if len(y) == 0:
+        y = 'catalog.gpkg'
+    ieo_config['catalog']['catgpkg'] = y
+    y = input('Please input the layer name for the Landsat scene catalogue (will use "WRS2_Ireland_scenes" if not set): ')    
+    if len(y) == 0:
+        y = 'WRS2_Ireland_scenes'
+    ieo_config['catalog']['landsat'] = y
 
     # Projection section
     ieo_config['Projection'] = {}
@@ -187,34 +205,48 @@ for d in ['Thumbnails', 'ESPA_processing_lists']:
     d1 = os.path.join(landsatcatdir, d)
     if not os.path.isdir(d1):
         newinidir(d1)
-cpb = False # copy badlist.txt to catdir
+#cpb = False # copy badlist.txt to catdir
+#
+#    cpb = True
+if os.path.isfile(badlistfile):
+    ans = input('Bad date text file {} exists. Overwrite? (y/N): '.format(os.path.basename(badlistfile)))
+    if ans.lower() == 'y' or ans.lower() == 'yes':
+        print('Deleting {}.'.format(os.path.basename(badlistfile)))
+        os.remove(badlistfile)
 if not os.path.isfile(badlistfile):
-    cpb = True
-else:
-    ans = input('Bad date text file {} exists. Overwrite? (y/N): '.format(badlistfile))
-    if ans.lower() == 'y' or ans.lower() == 'yes':
-        cpb = True
-if cpb:
+#    if cpb:
+    print('Copying {}.'.format(os.path.basename(badlistfile)))
     shutil.copy(os.path.join(lcatdir, 'badlist.txt'), badlistfile) # copy over a file of dates with known geometric errors
-cpb = False # copy ieo.gdb to catdir
-shpdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'shapefiles')
-if not os.path.isdir(shpdir):
-    cpb = True
-    os.mkdir(shpdir)
-else:
-    ans = input('Shapefile directory {} exists. Overwrite? (y/N): '.format(shpdir))
-    if ans.lower() == 'y' or ans.lower() == 'yes':
-        cpb = True
-if cpb:
-    lflist = glob.glob(os.path.join(ldatadir, '*.*'))
-    gflist = glob.glob(os.path.join(shpdir, '*.*'))
-    if len(gflist) > 0:
-        print('Deleting old shapefiles.')
-        for f in gflist:
-            os.remove(f)
-    print('Copying shapefiles.')
-    for f in lflist:
-        shutil.copy(f, shpdir)
+#cpb = False # copy ieo.gdb to catdir
+#shpdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'shapefiles')
+#if not os.path.isdir(shpdir):
+#    cpb = True
+#    os.mkdir(shpdir)
+#else:
+lflist = glob.glob(os.path.join(ldatadir, '*.gpkg'))
+if len(lflist) > 0:
+    for gpkg in lflist: 
+        basename = os.path.basename(gpkg)
+        outgpkg = os.path.join(ieo_config['DEFAULT']['catdir'], basename)
+        if os.path.isfile(outgpkg):
+            ans = input('Geopackage {} exists. Overwrite? (y/N): '.format(basename))
+            if ans.lower() == 'y' or ans.lower() == 'yes':
+                print('Deleting {}.'.format(basename))
+                os.remove(outgpkg)
+        if not os.path.isfile(outgpkg):
+            print('Copying {}.'.format(basename))
+            shutil.copy(gpkg, outgpkg)
+                
+#if cpb:
+#    lflist = glob.glob(os.path.join(ldatadir, '*.*'))
+#    gflist = glob.glob(os.path.join(shpdir, '*.*'))
+#    if len(gflist) > 0:
+#        print('Deleting old shapefiles.')
+#        for f in gflist:
+#            os.remove(f)
+#    print('Copying shapefiles.')
+#    for f in lflist:
+#        shutil.copy(f, shpdir)
 
 setup(
     # Application name:
