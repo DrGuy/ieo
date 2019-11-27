@@ -1543,7 +1543,6 @@ def maketarfile(f, archdir):
 
 def untarfile(file, outdir):
     import tarfile
-    tar = None
     basename = os.path.basename(file)
     outbasepath = os.path.basename(outdir)
     if outbasepath in basename:
@@ -1566,7 +1565,6 @@ def untarfile(file, outdir):
     except Exception as e:
         logerror(file, e)
         print(e)
-        if tar:
-            tar.close()
+        tar.close()
         os.remove(file) # delete bad tar.gz
         return 0

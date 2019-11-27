@@ -1,4 +1,4 @@
 numexpr
 numpy
-gdal
+gdal>=2
 pillow

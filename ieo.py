@@ -25,9 +25,12 @@ if not 'linux' in sys.platform: # this way I can use the same library for proces
     from osgeo import gdal, ogr, osr
 
 else: # Note- this hasn't been used or tested with Linux in a long time. It probably doesn't work.
-    import gdal, ogr, osr
-    sys.path.append('/usr/bin')
-    sys.path.append('/usr/local/bin')
+    try:
+        from osgeo import gdal, ogr, osr
+    except:
+        import gdal, ogr, osr
+        sys.path.append('/usr/bin')
+        sys.path.append('/usr/local/bin')
 
 # Set some global variables
 global fmaskdir, srdir, btdir, ingestdir, ndvidir, evidir, archdir, catdir, logdir, NTS, Sen2tiles, prjstr, WRS1, WRS2, defaulterrorfile, gdb_path, landsatshp, prj, projacronym, useProductID
@@ -1543,6 +1546,7 @@ def maketarfile(f, archdir):
 
 def untarfile(file, outdir):
     import tarfile
+    tar = None
     basename = os.path.basename(file)
     outbasepath = os.path.basename(outdir)
     if outbasepath in basename:
@@ -1565,6 +1569,7 @@ def untarfile(file, outdir):
     except Exception as e:
         logerror(file, e)
         print(e)
-        tar.close()
+        if tar:
+            tar.close()
         os.remove(file) # delete bad tar.gz
         return 0
