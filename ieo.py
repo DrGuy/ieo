@@ -1030,7 +1030,7 @@ def NDindex(A, B, *args, **kwargs):
 
 def importespa(f, *args, **kwargs):
     # This function imports new ESPA-process LEDAPS data
-    # Version 1.1.1: Landsat Collection 1 Level 2 data now supported
+    # Version 1.3.1: Landsat Collection 2 Level 2 data now supported
     overwrite = kwargs.get('overwrite', False)
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
@@ -1251,12 +1251,12 @@ def importespa(f, *args, **kwargs):
 
 def importespatotiles(f, *args, **kwargs):
     # This function imports new ESPA-process LEDAPS data
-    # Version 1.1.1: Landsat Collection 1 Level 2 data now supported
+    # Version 1.3.1: Landsat Collection 2 Level 2 data now supported
     overwrite = kwargs.get('overwrite', False)
     noupdate = kwargs.get('noupdate', False)
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
-    useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 1 Product ID rather than old Scene ID
+    useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 2 Product ID rather than old Scene ID
     btimg = None
     masktype = None
     basename = os.path.basename(f)

@@ -4,7 +4,7 @@
 # email: guyserbin <at> eoanalytics <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.3
+# version 1.3.1
 
 import os, sys, shutil, glob
 from setuptools import setup, find_packages
