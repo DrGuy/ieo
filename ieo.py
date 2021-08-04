@@ -4,7 +4,7 @@
 # email: guyserbin <at> eoanalytics <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.3
+# version 1.5
 
 
 # This contains code borrowed from the Python GDAL/OGR Cookbook: https://pcjericks.github.io/py-gdalogr-cookbook/
@@ -30,7 +30,7 @@ else: # Note- this hasn't been used or tested with Linux in a long time. It prob
     sys.path.append('/usr/local/bin')
 
 # Set some global variables
-global fmaskdir, srdir, btdir, ingestdir, ndvidir, evidir, archdir, catdir, logdir, NTS, Sen2tiles, prjstr, WRS1, WRS2, defaulterrorfile, gdb_path, landsatshp, prj, projacronym, useProductID
+global pixelqadir, aerosolqadir, radsatqadir, srdir, stdir, ingestdir, ndvidir, evidir, archdir, catdir, logdir, NTS, Sen2tiles, prjstr, WRS1, WRS2, defaulterrorfile, gdb_path, landsatshp, prj, projacronym, useProductID
 
 # configuration data
 if sys.version_info[0] == 2:
@@ -38,15 +38,24 @@ if sys.version_info[0] == 2:
 else:
     import configparser
 
+pythondir = os.path.dirname(sys.executable)
 
 # Access configuration data inside Python egg
 config = configparser.ConfigParser()
-config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
+ieoconfigdir = os.getenv('IEO_CONFIGDIR')
+if ieoconfigdir:
+    configfile = os.path.join(ieoconfigdir, 'ieo.ini')
+else:
+    configfile = 'config/ieo.ini'
+config_location = resource_filename(Requirement.parse('ieo'), configfile)
 config.read(config_location) # config_path
-fmaskdir = config['DEFAULT']['fmaskdir'] # support for fmask may be removed in future versions
+# fmaskdir = config['DEFAULT']['fmaskdir'] # Deprecated in version 1.5
 pixelqadir = config['DEFAULT']['pixelqadir']
-srdir = config['DEFAULT']['srdir']
-btdir = config['DEFAULT']['btdir']
+radsatqadir = config['DEFAULT']['radsatqadir']
+aerosolqadir = config['DEFAULT']['aerosolqadir']
+stdir = config['DEFAULT']['stdir'] # Surface Temperature 
+srdir = config['DEFAULT']['srdir'] # Surface Reflectance 
+# btdir = config['DEFAULT']['btdir'] #Brightness temperature, deprecated in version 1.5
 ingestdir = config['DEFAULT']['ingestdir']
 ndvidir = config['DEFAULT']['ndvidir']
 evidir = config['DEFAULT']['evidir']
@@ -77,8 +86,8 @@ else:
 # Configuration data for maskfromqa()
 global qaland, qawater, qasnow, qashadow, qausemedcloud, qausemedcirrus, qausehighcirrus, qauseterrainocclusion
 qaland = True # Include land pixels
-qawater = False # Include water pixels
-qasnow = False # Include snow/ice pixels
+qawater = True # Include water pixels
+qasnow = True # Include snow/ice pixels
 qashadow = False # Include cloud shadowed pixels
 qausemedcloud = False # Allow medium confidence cloud pixels to be treated as clear
 qausemedcirrus = True # Allow medium confidence cirrus pixels to be treated as clear
@@ -455,7 +464,7 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     # includes code from https://gis.stackexchange.com/questions/220844/get-field-names-of-shapefiles-using-gdal
     inshp = kwargs.get('inshape', landsatshp) #input shapefile containing data inventory
     tileshp = kwargs.get('tileshp', NTS) 
-    pixelqa = kwargs.get('pixelqa', True) # determines whether to search for Pixel QA of CFmask files
+    pixelqa = kwargs.get('pixelqa', True) # determines whether to search for Pixel and Radsat QA files
     rewriteheader = kwargs.get('rewriteheader', True)
     overwrite = kwargs.get('overwrite', True) # overwrite existing files without updating, deleting any tiles first.
     noupdate = kwargs.get('noupdate', False) # if set to True, will not update existing tiles with new data.
@@ -527,10 +536,13 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
 #        'Surface_reflectance_tiles' : ['ref'], #['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
 #        'NDVI_tiles' : ['NDVI'],
 #        'EVI_tiles' : ['EVI']}
-    fieldnamedict = {'Fmask' : 'Fmask_tiles',
+    fieldnamedict = {#'Fmask' : 'Fmask_tiles',
         'pixel_qa' : 'Pixel_QA_tiles',
-        'Landsat TIR' : 'Brightness_temperature_tiles', #[, 'Landsat Band6'],
-        'Landsat Band6' : 'Brightness_temperature_tiles', #[, ],
+        'QA_RADSAT' : 'Radsat_QA_tiles',
+        'SR_QA_AEROSOL' : 'Aerosol_QA_tiles',
+        'Landsat ST' : 'Surface_temperature_tiles',
+        # 'Landsat TIR' : 'Brightness_temperature_tiles', #[, 'Landsat Band6'],
+        # 'Landsat Band6' : 'Brightness_temperature_tiles', #[, ],
         'ref' : 'Surface_reflectance_tiles', #['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
         'NDVI' : 'NDVI_tiles',
         'EVI' : 'EVI_tiles'}
@@ -567,11 +579,12 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
         tilename = tile.GetField('Tile')
 #                print(tilename)
 #                print(tilegeom.Intersect(featgeom))
-        if tilegeom.Intersect(rasterGeometry) and not sceneid[9:16] in getbadlist():
+        if tilegeom.Intersect(rasterGeometry): # and not sceneid[9:16] in getbadlist():
             if pixelqa:
                 basedir = os.path.dirname(outdir)
                 tileqafile = os.path.join(os.path.join(basedir, 'pixel_qa'), '{}_{}.dat'.format(outbasename, tilename))
-                pixelqadata = gettileqamask(tileqafile, sid, land = True, water = True, snowice = True, usemedcloud = True, usehighcirrus = True, useterrainocclusion = True)
+                tileradsatfile = os.path.join(os.path.join(basedir, 'radsat_qa'), '{}_{}.dat'.format(outbasename, tilename))
+                pixelqadata = gettileqamask(tileqafile, tileradsatfile, sid, land = True, water = True, snowice = True, usemedcloud = True, usehighcirrus = True, useterrainocclusion = True)
             else: 
                 pixelqadata = None
             print('Now creating tile {} of type {} for SceneID {}.'.format(tilename, rastertype, sid))
@@ -644,6 +657,7 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     tilename = tile.GetField('Tile')
     tilegeom = tile.GetGeometryRef()
     outfile = os.path.join(outdir, '{}_{}.dat'.format(outbasename, tilename))
+    parentrasters =[inrastername]
     if rastertype == 'ref': #, 'Landsat TIR', 'Landsat Band6']:
         print('SceneID = {}'.format(SceneID))
         if SceneID[2:3] == '8': # and not (rastertype in ['Landsat TIR', 'Landsat Band6']):
@@ -653,6 +667,8 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     else:
         hdtype = rastertype
     ndval = headerdict[hdtype]['data ignore value']
+    if not ndval:
+        ndval = 0
     print('hdtype = {}, data ignore value = {}'.format(hdtype, ndval))
     if os.path.isfile(outfile) and not overwrite and not update: # skips this tile if the tile is not to be overwritten or updated.
         print('The tile {} exists already on disk, and both overwrite and update flags are set to False. Skipping this tile,'.format(os.path.basename(tilename)))
@@ -894,8 +910,106 @@ def maskfromqa(qafile, landsat, sceneid, *args, **kwargs):
     qaobj = None
     return mask
 
+def maskfromqa_c2(qafile, tafile, landsat, sceneid, *args, **kwargs):
+    # Added in version 1.5. This recreates a processing mask layer to memory using the pixel_qa layer for Landsat Collection 2. It does not save to disk.
+    land = kwargs.get('land', qaland) # Include land pixels
+    water = kwargs.get('water', qawater) # Include water pixels
+    snow = kwargs.get('snowice', qasnow) # Include snow/ice pixels
+    shadow = kwargs.get('shadow', qashadow) # Include cloud shadowed pixels
+    usemedcloud = kwargs.get('usemedcloud', qausemedcloud) # Allow medium confidence cloud pixels to be treated as clear
+    # usemedcirrus = kwargs.get('usemedcirrus', qausemedcirrus) # Allow medium confidence cirrus pixels to be treated as clear
+    # usehighcirrus = kwargs.get('usehighcirrus', qausehighcirrus) # Allow high confidence cirrus pixels to be treated as clear
+    # useterrainocclusion = kwargs.get('useterrainocclusion', qauseterrainocclusion) # Allow terrain-occluded pixels to be treated as clear
 
-def gettileqamask(f, sceneid, *args, **kwargs):
+    # if usehighcirrus:
+    #     usemedcirrus = True
+
+    # Create list of pixel value that will be used for the good data mask (bit data baased upon USGS/EROS LEAPS/ LaSRC Product Guides)
+    if landsat >= 8:
+        bitinfo = ['Fill', 'Dilated Cloud', 'Cirrus', 'Cloud', 'Cloud Shadow', 'Snow', 'Clear', 'Water', 'No/ low cloud confidence', 'med/ high cloud confidence', 'No/ low cloud shadow confidence', 'med/ high cloud shadow confidence',  'No/ low snow/ice confidence', 'med/ high snow/ice confidence', 'No/ low cirrus confidence', 'med/ high cirrus confidence']
+        includevals = [0, 1, 2, 3, 4, 9, 11, 15]
+    else: 
+        bitinfo = ['Fill', 'Dilated Cloud', 'Cloud', 'Cloud Shadow', 'Snow', 'Clear', 'Water', 'No/ low cloud confidence', 'med/ high cloud confidence', 'No/ low cloud shadow confidence', 'med/ high cloud shadow confidence',  'No/ low snow/ice confidence', 'med/ high snow/ice confidence']
+        includevals = [0, 1, 3, 4, 9, 11]
+    if not snow:    # This filters out snow/ice affected pixels if snow == False
+        includevals.append(5)
+        includevals.append(13)
+    # baseL47 = 64 # Bit 6 always set to 1 unless bit 7 set to 1
+    # baseL8 = 64 + 256 # Bits 6, 8 always set to 1 unless bits 7, 9 set to 1, respectively
+    # for x, y in zip([land, water, shadow, snow], bitinfo[1:4]):
+    #     if x:
+            # if landsat >= 8:
+            # includevals.append(2 ** bitinfo.index(y) + baseL8)
+            # if usemedcloud:
+            # includevals.append(2 ** bitinfo.index(y) + baseL8 + 64)
+            # if usehighcirrus:
+            # includevals.append(2 ** bitinfo.index(y) + baseL8 + 512)
+            # if usemedcirrus:
+            # includevals.append(2 ** bitinfo.index(y) + baseL8 + 256)
+            # if useterrainocclusion:
+            # includevals.append(2 ** bitinfo.index(y) + baseL8 + 1024)
+            # else:
+            #     includevals.append(2 ** bitinfo.index(y) + baseL47)
+            #     if usemedcloud:
+            #         includevals.append(2 ** bitinfo.index(y) + baseL47 + 64)
+
+    # Open Pixel QA file
+    print('Opening Pixel QA layer for scene {}.'.format(sceneid))
+    qaobj = gdal.Open(qafile)
+    qalayer = qaobj.GetRasterBand(1).ReadAsArray()
+    # Get file geometry
+    ns = qaobj.RasterXSize
+    nl = qaobj.RasterYSize
+
+    # Create mask of zero values
+    mask = numpy.ones((nl, ns), dtype = numpy.uint8)
+    if len(includevals) > 0: # mask for clouds, shadows, etc.
+        for val in includevals:
+            m0 = qalayer & (1 << val)
+            maskvals = numexpr.evaluate('(m0 != 0)')
+            mask[maskvals] = 0
+            if val == 9 and not usemedcloud:
+                m1 = qalayer & (1 << 8)
+                maskvals = numexpr.evaluate('(m0 != 0) & (m1 == 0')
+                mask[maskvals] = 0
+                del m1
+            del m0
+
+    maskvals = None
+    qalayer = None
+    qaobj = None
+    
+    # mask for band saturation and terrain occlusions
+    
+    # print('Opening Radiometric Saturation and Terrain Occlusion QA layer for scene {}.'.format(sceneid))
+    # qaobj = gdal.Open(tafile)
+    # qalayer = qaobj.GetRasterBand(1).ReadAsArray()
+    # # Get file geometry
+    # ns = qaobj.RasterXSize
+    # nl = qaobj.RasterYSize
+    
+    # if landsat >= 8:
+    #     includevals = [0, 1, 2, 3, 4, 5, 6, 8, 11]
+    # else:
+    #     includevals = [0, 1, 2, 3, 4, 5, 6, 8, 9]
+
+    # # Create mask of zero values
+    # mask = numpy.zeros((nl, ns), dtype = numpy.uint8)
+    # if len(includevals) > 0: # mask for clouds, shadows, etc.
+    #     for val in includevals:
+    #         m0 = qalayer & (1 << val)
+    #         maskvals = numexpr.evaluate('(m0 != 0)')
+    #         mask[maskvals] = 1
+    #         del m0
+
+    # maskvals = None
+    # qalayer = None
+    # qaobj = None
+    
+    return mask
+
+
+def gettileqamask(f, tamask, sceneid, *args, **kwargs):
     # started on 24 July 2019
     # This function identifies will get Pixel QA data for a specific NRT tile 
     land = kwargs.get('land', qaland) # Include land pixels
@@ -920,35 +1034,35 @@ def gettileqamask(f, sceneid, *args, **kwargs):
             logerror(f, 'Error: Pixel QA/ cloud mask file missing. Skipping scene.')
             return None
     print('Now creating good pixel mask using cloud mask file: {}'.format(f))
-    return maskfromqa(f, int(os.path.basename(f)[2:3]), sceneid, land = land, water = water, snowice = snow, usemedcloud = usemedcloud, usemedcirrus = usemedcirrus, usehighcirrus = usehighcirrus, useterrainocclusion = useterrainocclusion, shadow = shadow) #
+    return maskfromqa_c2(f, tamask, int(os.path.basename(f)[2:3]), sceneid, land = land, water = water, snowice = snow, usemedcloud = usemedcloud, usemedcirrus = usemedcirrus, usehighcirrus = usehighcirrus, useterrainocclusion = useterrainocclusion, shadow = shadow) #
 
 
 def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     # This function creates NDVI and EVI files.
     useqamask = kwargs.get('useqamask', True)
-    usefmask = kwargs.get('usefmask', False)
-    usecfmask = kwargs.get('usecfmask', False)
+    # usefmask = kwargs.get('usefmask', False)
+    # usecfmask = kwargs.get('usecfmask', False)
     dirname, basename = os.path.split(refitm)
     i = basename.find('_ref_')
     sceneid = basename[:i] # This will now use either the SceneID or ProductID
     acqtime = envihdracqtime(refitm.replace('.dat', '.hdr'))
-    qafile = kwargs.get('qafile', os.path.join(pixelqadir,'{}_pixel_qa.dat'.format(sceneid)))
-    fmaskfile = os.path.join(fmaskdir,'{}_cfmask.dat'.format(sceneid))
+    qafile = kwargs.get('qafile', os.path.join(pixelqadir,'{}_QA_PIXEL.dat'.format(sceneid)))
+    # fmaskfile = os.path.join(fmaskdir,'{}_cfmask.dat'.format(sceneid))
     parentrasters = [os.path.basename(refitm)]
-    if useqamask:
-        if not os.path.isfile(qafile):
-            usefmask = False
-            usecfmask = False
-    if usefmask or usecfmask:
-        usefmask = True
-        if not os.path.isfile(fmaskfile):
-            fmaskfile = fmaskfile.replace('_cfmask.dat', '_fmask.dat')
-            if not os.path.exists(fmaskfile):
-                print('ERROR: Fmask file does not exist, returning.')
-                logerror(fmaskfile, 'File not found.')
-                usefmask = False
-            else:
-                parentrasters.append(os.path.basename(fmaskfile))
+    # if useqamask:
+    #     if not os.path.isfile(qafile):
+    #         usefmask = False
+    #         usecfmask = False
+    # if usefmask or usecfmask:
+    #     usefmask = True
+    #     if not os.path.isfile(fmaskfile):
+    #         fmaskfile = fmaskfile.replace('_cfmask.dat', '_fmask.dat')
+    #         if not os.path.exists(fmaskfile):
+    #             print('ERROR: Fmask file does not exist, returning.')
+    #             logerror(fmaskfile, 'File not found.')
+    #             usefmask = False
+    #         else:
+    #             parentrasters.append(os.path.basename(fmaskfile))
 
     print('Calculating NDVI for scene {}.'.format(sceneid))
     refobj = gdal.Open(refitm)
@@ -963,14 +1077,14 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
         else:
             landsat = int(sceneid[2:3])
         fmask = maskfromqa(qafile, landsat, sceneid)
-    elif usefmask:
-        fmaskobj = gdal.Open(fmaskfile)
-        fmaskdata = fmaskobj.GetRasterBand(1).ReadAsArray()
-        fmask = numpy.zeros((nl, ns), dtype = numpy.uint8)
-        maskvals = numexpr.evaluate('(fmaskdata == 0)')
-        fmask[maskvals] = 1
-        fmaskdata = None
-        maskvals = None
+    # elif usefmask:
+    #     fmaskobj = gdal.Open(fmaskfile)
+    #     fmaskdata = fmaskobj.GetRasterBand(1).ReadAsArray()
+    #     fmask = numpy.zeros((nl, ns), dtype = numpy.uint8)
+    #     maskvals = numexpr.evaluate('(fmaskdata == 0)')
+    #     fmask[maskvals] = 1
+    #     fmaskdata = None
+    #     maskvals = None
     else:
         print('Warning: No Fmask file found for scene {}.'.format(sceneid))
         fmask = None
@@ -1030,7 +1144,7 @@ def NDindex(A, B, *args, **kwargs):
 
 def importespa(f, *args, **kwargs):
     # This function imports new ESPA-process LEDAPS data
-    # Version 1.3.1: Landsat Collection 2 Level 2 data now supported
+    # Version 1.3.1: Landsat Collection 1 Level 2 and earlier only supported
     overwrite = kwargs.get('overwrite', False)
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
@@ -1098,7 +1212,7 @@ def importespa(f, *args, **kwargs):
     layer = data_source.GetLayer(landsatshp)
     while not sceneid:
         feat = layer.GetNextFeature()
-        if ProductID == feat.GetField('Landsat_Product_ID'):
+        if ProductID == feat.GetField('Landsat_Product_ID_L2'):
             sceneid = feat.GetField('sceneID')
 
     # delete any processed files if overwrite is set
@@ -1132,7 +1246,7 @@ def importespa(f, *args, **kwargs):
             feat.SetField('Scene_mask_type', masktype)
 
     # Pixel QA layer
-    in_raster = os.path.join(outputdir, '{}_pixel_qa.{}'.format(ProductID, ext))
+    in_raster = os.path.join(outputdir, '{}_QA_PIXEL.{}'.format(ProductID, ext))
     if os.access(in_raster, os.F_OK):
         if useProdID:
             out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(ProductID))
@@ -1249,15 +1363,17 @@ def importespa(f, *args, **kwargs):
 
     print('Processing complete for scene {}.'.format(sceneid))
 
-def importespatotiles(f, *args, **kwargs):
-    # This function imports new ESPA-process LEDAPS data
-    # Version 1.3.1: Landsat Collection 2 Level 2 data now supported
+def importc2(f, *args, **kwargs):
+    # This function imports new Landsat Collection 2 Level 2 data 
+    # Version 1.5
     overwrite = kwargs.get('overwrite', False)
-    noupdate = kwargs.get('noupdate', False)
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
-    useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 2 Product ID rather than old Scene ID
+    useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 1 Product ID rather than old Scene ID
     btimg = None
+    taimg = None
+    aerosolimg = None
+    qaimg = None
     masktype = None
     basename = os.path.basename(f)
     dirname = os.path.dirname(f)
@@ -1268,14 +1384,14 @@ def importespatotiles(f, *args, **kwargs):
     outputdir = None
     projection = prj.GetAttrValue('projcs')
 
-    if landsat == '8':
+    if landsat == '8' or landsat == '9':
         bands = ['1', '2', '3', '4', '5', '6', '7']
     elif basename[1:2] == 'M':
         print('Landsat MSS is not supported yet, returning.')
         return
     else:
         bands = ['1', '2', '3', '4', '5', '7']
-    if f.endswith('.tar.gz'):
+    if f.endswith('.tar.gz') or f.endswith('.tar'):
         if tempdir:
             if not os.path.isdir(tempdir):
                 try:
@@ -1287,16 +1403,13 @@ def importespatotiles(f, *args, **kwargs):
             if '-' in basename:
                 i = f.rfind('-')
             else:
-                i = f.find('.tar.gz')
+                i = f.find('.tar')
             outputdir = f[:i]
         filelist = untarfile(f, outputdir)
     else:
         filelist = glob.glob(os.path.join(dirname, '*'))
         outputdir = dirname
-    tdir = os.path.join(outputdir, projacronym)
-    if not os.path.isdir(tdir):
-        os.mkdir(tdir)
-    if isinstance(filelist, int) or len(filelist) == 0:
+    if filelist == 0 or len(filelist) == 0:
         print('ERROR: there is a problem with the files, skipping.')
         if len(filelist) == 0:
             logerror(f, 'No files found.')
@@ -1321,20 +1434,14 @@ def importespatotiles(f, *args, **kwargs):
     driver = ogr.GetDriverByName("GPKG")
     data_source = driver.Open(catgpkg, 1) # opened with write access as LEDAPS data will be updated
     layer = data_source.GetLayer(landsatshp)
-    ldefn = layer.GetLayerDefn()
-    schema = [ldefn.GetFieldDefn(n).name for n in range(ldefn.GetFieldCount())]
-    if not 'Tile_filename_base' in schema: # this will add two fields to the s
-        tilebasefield = ogr.FieldDefn('Tile_filename_base', ogr.OFTString)
-        layer.CreateField(tilebasefield)
-    layer.StartTransaction()
     while not sceneid:
         feat = layer.GetNextFeature()
-        if ProductID == feat.GetField('Landsat_Product_ID'):
+        if ProductID == feat.GetField('Landsat_Product_ID_L2'):
             sceneid = feat.GetField('sceneID')
 
     # delete any processed files if overwrite is set
     if overwrite:
-        for d in [fmaskdir, pixelqadir, srdir, btdir, ndvidir, evidir]:
+        for d in [aerosolqadir, radsatqadir, pixelqadir, srdir, stdir, ndvidir, evidir]:
             dellist = glob.glob(os.path.join(d, '{}*.*'.format(sceneid[:16]))) # This will delete everything from the same date, path, and row, and ignore station/ processing info in sceneid[16:21]
             if len(dellist) > 0:
                 print('Deleting existing output files.')
@@ -1346,73 +1453,78 @@ def importespatotiles(f, *args, **kwargs):
                 for entry in dellist:
                     os.remove(entry)
 
-    # Fmask file, if exists
-    in_raster = os.path.join(outputdir, '{}_cfmask.{}'.format(sceneid, ext))
-    if os.access(in_raster, os.F_OK):
-        if useProdID:
-            out_raster = os.path.join(tdir, '{}_cfmask.dat'.format(ProductID))
-        else:
-            out_raster = os.path.join(tdir, '{}_cfmask.dat'.format(sceneid))
-        if not os.path.exists(out_raster):
-            print('Reprojecting {} Fmask to {}.'.format(sceneid, projection))
-            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'Fmask')
-        masktype = 'Fmask'
-#        if feat.GetField('Fmask_path') != out_raster:
-#            feat.SetField('Fmask_path', out_raster)
-        if feat.GetField('MaskType') != masktype:
-            feat.SetField('MaskType', masktype)
-            layer.SetFeature(feat)
-        qafile = out_raster
-        feat = converttotiles(out_raster, fmaskdir, 'Fmask', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
     # Pixel QA layer
-    in_raster = os.path.join(outputdir, '{}_pixel_qa.{}'.format(ProductID, ext))
+    in_raster = os.path.join(outputdir, '{}_QA_PIXEL.{}'.format(ProductID, ext))
     if os.access(in_raster, os.F_OK):
         if useProdID:
-            out_raster = os.path.join(tdir, '{}_pixel_qa.dat'.format(ProductID))
+            out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(ProductID))
         else:
-            out_raster = os.path.join(tdir, '{}_pixel_qa.dat'.format(sceneid))
+            out_raster = os.path.join(pixelqadir, '{}_pixel_qa.dat'.format(sceneid))
         if not os.path.isfile(out_raster):
             print('Reprojecting {} Pixel QA layer to {}.'.format(sceneid, projection))
             reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'pixel_qa')
         masktype = 'Pixel_QA'
 #        if feat.GetField('PixQA_path') != out_raster:
 #            feat.SetField('PixQA_path', out_raster)
-#        mt = feat.GetField('MaskType')
-#        if not mt:
-#            mt = '0'
-        if feat.GetField('MaskType') != masktype:
-            feat.SetField('MaskType', masktype)
-            layer.SetFeature(feat)
-        qafile = out_raster
-        feat = converttotiles(out_raster, pixelqadir, 'pixel_qa', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
-        layer.SetFeature(feat)
-        
+        if feat.GetField('Scene_mask_type') != masktype:
+            feat.SetField('Scene_mask_type', masktype)
+
+    # Radiometric Saturation Quality Assessment layer
+    in_raster = os.path.join(outputdir, '{}_QA_RADSAT.{}'.format(ProductID, ext))
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(tadir, '{}_QA_RADSAT.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(tadir, '{}_QA_RADSAT.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):
+            print('Reprojecting {} Radiometric Saturation QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'QA_RADSAT')
+        masktype = 'QA_RADSAT'
+#        if feat.GetField('PixQA_path') != out_raster:
+#            feat.SetField('PixQA_path', out_raster)
+        # if feat.GetField('Scene_mask_type') != masktype:
+        #     feat.SetField('Scene_mask_type', masktype)
+
+    # Aerosol Quality Assessment layer
+    in_raster = os.path.join(outputdir, '{}_SR_QA_AEROSOL.{}'.format(ProductID, ext))
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(tadir, '{}_SR_QA_AEROSOL.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(tadir, '{}_SR_QA_AEROSOL.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):
+            print('Reprojecting {} Aerosol QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'SR_QA_AEROSOL')
+        masktype = 'SR_QA_AEROSOL'
+#        if feat.GetField('PixQA_path') != out_raster:
+#            feat.SetField('PixQA_path', out_raster)
+        # if feat.GetField('Scene_mask_type') != masktype:
+        #     feat.SetField('Scene_mask_type', masktype)
+
     # Surface reflectance data
     if useProdID:
-        out_itm = os.path.join(tdir,'{}_ref_{}.dat'.format(ProductID, projacronym))
+        out_itm = os.path.join(srdir,'{}_ref_{}.dat'.format(ProductID, projacronym))
     else:
-        out_itm = os.path.join(tdir,'{}_ref_{}.dat'.format(sceneid, projacronym))
-#    if not os.path.isfile(out_itm):
-    print('Compositing surface reflectance bands to single file.')
-    srlist = []
-    out_raster = os.path.join(outputdir, '{}.vrt'.format(sceneid))  # no need to update to ProductID for now- it is a temporary file
-    if not os.path.isfile(out_raster):
-        mergelist = ['gdalbuildvrt', '-separate', out_raster]
-        for band in bands:
-            fname = os.path.join(outputdir, '{}_sr_band{}.{}'.format(ProductID, band, ext))
-            srlist.append(os.path.basename(fname))
-            if not os.path.isfile(fname):
-                print('Error, {} is missing. Returning.'.format(os.path.basename(fname)))
-                logerror(f, '{} band {} file missing.'.format(ProductID, band))
-                return
-            mergelist.append(fname)
-        p = Popen(mergelist)
-        print(p.communicate())
-    print('Reprojecting {} reflectance data to {}.'.format(sceneid, projection))
-    reproject(out_raster, out_itm, rastertype = 'ref', sceneid = sceneid, parentrasters = srlist)
+        out_itm = os.path.join(srdir,'{}_ref_{}.dat'.format(sceneid, projacronym))
+    if not os.path.isfile(out_itm):
+        print('Compositing surface reflectance bands to single file.')
+        srlist = []
+        out_raster = os.path.join(outputdir, '{}.vrt'.format(sceneid))  # no need to update to ProductID for now- it is a temporary file
+        if not os.path.exists(out_raster):
+            mergelist = ['gdalbuildvrt', '-separate', out_raster]
+            for band in bands:
+                fname = os.path.join(outputdir, '{}_sr_band{}.{}'.format(ProductID, band, ext))
+                srlist.append(os.path.basename(fname))
+                if not os.path.isfile(fname):
+                    print('Error, {} is missing. Returning.'.format(os.path.basename(fname)))
+                    logerror(f, '{} band {} file missing.'.format(ProductID, band))
+                    return
+                mergelist.append(fname)
+            p = Popen(mergelist)
+            print(p.communicate())
+        print('Reprojecting {} reflectance data to {}.'.format(sceneid, projection))
+        reproject(out_raster, out_itm, rastertype = 'ref', sceneid = sceneid, parentrasters = srlist)
 #        feat.SetField('SR_path', out_itm) # Update LEDAPS info in shapefile
-    feat = converttotiles(out_itm, srdir, 'ref', pixelqa = True, overwrite = overwrite, feature = feat, noupdate = noupdate)
-    layer.SetFeature(feat)
 
     # Thermal data
     print('Processing thermal data.')
@@ -1442,7 +1554,352 @@ def importespatotiles(f, *args, **kwargs):
         if not os.path.isfile(BT_ITM):
             print('Reprojecting {} brightness temperature data to {}.'.format(sceneid, projection))
             reproject(btimg, BT_ITM, rastertype = rastertype, sceneid = sceneid, parentrasters = parentrasters)
-        feat = converttotiles(BT_ITM, btdir, rastertype, pixelqa = True, feature = feat, overwrite = overwrite, noupdate = noupdate)
+#        if feat.GetField('BT_path') != BT_ITM:
+#            feat.SetField('BT_path', BT_ITM)
+
+    # Calculate EVI and NDVI
+    print('Processing vegetation indices.')
+    if useProdID:
+        evibasefile = '{}_EVI.dat'.format(ProductID)
+    else:
+        evibasefile = '{}_EVI.dat'.format(sceneid)
+    evifile = os.path.join(evidir, evibasefile)
+    ndvifile = os.path.join(evidir, evibasefile.replace('_EVI', '_NDVI'))
+    if not os.path.isfile(evifile):
+        try:
+            calcvis(out_itm)
+        except Exception as e:
+            print('An error has occurred calculating VIs for scene {}:'.format(sceneid))
+            print(e)
+            logerror(out_itm, e)
+#    if os.path.isfile(evifile) and feat.GetField('EVI_path') != evifile:
+#        feat.SetField('EVI_path', evifile)
+#    if os.path.isfile(ndvifile) and feat.GetField('NDVI_path') != ndvifile:
+#        feat.SetField('NDVI_path', ndvifile)
+
+    # Set feature in shapefile to preserve processed file metadata
+    print('Updating information in shapefile.')
+    layer.SetFeature(feat)
+    data_source = None # Close the shapefile
+
+    # Clean up files.
+
+    if basename.endswith('.tar.gz'):
+        print('Moving {} to archive: {}'.format(basename, archdir))
+        if not os.access(os.path.join(archdir, os.path.basename(f)), os.F_OK):
+            shutil.move(f, archdir)
+    if remove:
+        print('Cleaning up files in directory.')
+        filelist = glob.glob(os.path.join(outputdir, '{}*.*'.format(sceneid)))
+        try:
+            for fname in filelist:
+                if os.access(fname, os.F_OK):
+                    os.remove(fname)
+            os.rmdir(outputdir)
+        except Exception as e:
+            print('An error has occurred cleaning up files for scene {}:'.format(sceneid))
+            print(e)
+            logerror(f, e)
+
+    print('Processing complete for scene {}.'.format(sceneid))
+
+def scaleVSWIR(f, ext, *args, **kwargs):
+    # This function scales Landsat VSWIR data so that reflectance is a double integer between 1 - 9999, e.g, refectance * 10000, consistent with Landsat Collection 1
+    # Introduced in version 1.5
+    gdal_calc = os.path.join(pythondir, 'Scripts', 'gdal_calc.py')
+    
+    outf = f.replace('.{}'.format(ext), '_cal.{}'.format(ext))
+    plist = ['python', gdal_calc, '--calc="10000 * (A.astype(numpy.float32) * 0.0000275 - 0.2)"', '--NoDataValue=-9999', '--type=Int16', '-A', f, '--outfile={}'.format(outf)]
+    p = Popen(plist)
+    print('Now calibrating {} to surface reflectance.'.format(os.path.basename(f)))
+    print(p.communicate())
+    
+    return outf
+
+def scaleTIR(f, ext, *args, **kwargs):
+    # This function scales Landsat TIR data so that land surface temperature (LST) is a double integer between 1 - 9999, e.g, LST * 10, consistent with Landsat Collection 1
+    # Introduced in version 1.5
+    gdal_calc = os.path.join(pythondir, 'Scripts', 'gdal_calc.py')
+    outf = f.replace('.{}'.format(ext), '_cal.{}'.format(ext))
+    plist = ['python', gdal_calc, '--calc="10 * (A.astype(numpy.float32) * 	0.00341802 + 149)"', '--NoDataValue=-9999', '--type=Int16', '-A', f, '--outfile={}'.format(outf)]
+    p = Popen(plist)
+    print('Now calibrating {} to land surface temperature.'.format(os.path.basename(f)))
+    print(p.communicate())
+    
+    return outf
+    
+    # nodatamask = kwargs.get('nodatamask', None)
+    # rasterobj = gdal.Open(f)
+    # data = rasterobj.GetRasterBand(1).ReadAsArray()
+    # # Get file geometry
+    # ns = qaobj.RasterXSize
+    # nl = qaobj.RasterYSize
+    
+    # # Check for nodatamask, create if nonexistent
+    
+    # if not nodatamask:
+    #     outdata = numpy.ones((nl, ns), dtype = numpy.uint8)
+
+    # # Create mask of zero values
+    # outdata = numpy.zeros((nl, ns), dtype = numpy.int16)
+    # validrange = numexpr.evaluate('(data > 0) & (data <= 65455)')
+    # nodata = numexpr.evaluate('(data == 0)')
+    # outdata[nodata] = -9999
+    # outdata[validrange] = int(10000 * (data[validrange]	* 0.0000275) - 0.2)
+    # nodata2 = numexpr.evaluate('(outdata < 0) | (outdata > 10000)') # exclude pixels with reflectance that are below 0 or above 100%
+    # outdata[nodata2] = -9999
+    # nodatamask[nodata] = 0
+    # nodatamask[nodata2] = 0
+
+def importespatotiles(f, *args, **kwargs):
+    # This function imports new ESPA-process LEDAPS data
+    # Version 1.3.1: Landsat Collection 2 Level 2 data now supported
+    overwrite = kwargs.get('overwrite', False)
+    noupdate = kwargs.get('noupdate', False)
+    tempdir = kwargs.get('tempdir', None)
+    remove = kwargs.get('remove', False)
+    useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 2 Product ID rather than old Scene ID
+    btimg = None
+    masktype = None
+    basename = os.path.basename(f)
+    dirname = os.path.dirname(f)
+    if basename[2:3] == '0': # This will have to be updated once Landsat 10 launches
+        landsat = basename[3:4]
+    else:
+        landsat = basename[2:3]
+    outputdir = None
+    projection = prj.GetAttrValue('projcs')
+
+    if landsat == '8':
+        bands = ['1', '2', '3', '4', '5', '6', '7']
+    elif basename[1:2] == 'M':
+        print('Landsat MSS is not supported yet, returning.')
+        return
+    else:
+        bands = ['1', '2', '3', '4', '5', '7']
+    if f.endswith('.tar.gz') or f.endswith('.tar'):
+        if tempdir:
+            if not os.path.isdir(tempdir):
+                try:
+                    os.mkdir(tempdir)
+                    outputdir = tempdir
+                except:
+                    outputdir = None
+        if not outputdir:
+            if '-' in basename:
+                i = f.rfind('-')
+            else:
+                i = f.find('.tar')
+            outputdir = f[:i]
+            ProductID = os.path.basename(outputdir)
+        filelist = untarfile(f, outputdir)
+    else:
+        filelist = glob.glob(os.path.join(dirname, '*'))
+        outputdir = dirname
+    tdir = os.path.join(outputdir, projacronym)
+    if not os.path.isdir(tdir):
+        os.mkdir(tdir)
+    if isinstance(filelist, int) or len(filelist) == 0:
+        print('ERROR: there is a problem with the files, skipping.')
+        if len(filelist) == 0:
+            logerror(f, 'No files found.')
+        return
+
+    
+    ext = 'tif'
+    # if any(x.endswith('.tif') for x in filelist):
+    #     ext = 'tif'
+    # else:
+    #     ext = 'img'
+    # xml = glob.glob(os.path.join(outputdir, '*.xml'))
+    # if len(xml) > 0:
+    #     ProductID = os.path.basename(xml[0]).replace('.xml', '') # Modified from sceneID in 1.1.1: sceneID will now be read from landsatshp
+    # elif basename[:1] == 'L' and len(basename) > 40:
+    #     ProductID = basename[:40]
+    # else:
+    #     print('No XML file found, returning.')
+    #     logerror(f, 'No XML file found.')
+    #     return
+
+    # open landsat shapefile (starting version 1.1.1)
+    sceneid = None
+    driver = ogr.GetDriverByName("GPKG")
+    data_source = driver.Open(catgpkg, 1) # opened with write access as LEDAPS data will be updated
+    layer = data_source.GetLayer(landsatshp)
+    ldefn = layer.GetLayerDefn()
+    schema = [ldefn.GetFieldDefn(n).name for n in range(ldefn.GetFieldCount())]
+    if not 'Tile_filename_base' in schema: # this will add two fields to the s
+        tilebasefield = ogr.FieldDefn('Tile_filename_base', ogr.OFTString)
+        layer.CreateField(tilebasefield)
+    layer.StartTransaction()
+    while not sceneid:
+        feat = layer.GetNextFeature()
+        if feat:
+            if ProductID == feat.GetField('LANDSAT_PRODUCT_ID_L2'):
+                sceneid = feat.GetField('sceneID')
+
+    # delete any processed files if overwrite is set
+    if overwrite:
+        for d in [radsatqadir, aerosolqadir, pixelqadir, srdir, stdir, ndvidir, evidir]:
+            dellist = glob.glob(os.path.join(d, '{}*.*'.format(sceneid[:16]))) # This will delete everything from the same date, path, and row, and ignore station/ processing info in sceneid[16:21]
+            if len(dellist) > 0:
+                print('Deleting existing output files.')
+                for entry in dellist:
+                    os.remove(entry)
+            dellist = glob.glob(os.path.join(d, '{}*.*'.format(ProductID)))
+            if len(dellist) > 0:
+                print('Deleting existing output files.')
+                for entry in dellist:
+                    os.remove(entry)
+
+    # Fmask file, if exists # Removed in version 1.5, as IEO only support Collection 2 Level 2 data now
+#     in_raster = os.path.join(outputdir, '{}_cfmask.{}'.format(sceneid, ext))
+#     if os.access(in_raster, os.F_OK):
+#         if useProdID:
+#             out_raster = os.path.join(tdir, '{}_cfmask.dat'.format(ProductID))
+#         else:
+#             out_raster = os.path.join(tdir, '{}_cfmask.dat'.format(sceneid))
+#         if not os.path.exists(out_raster):
+#             print('Reprojecting {} Fmask to {}.'.format(sceneid, projection))
+#             reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'Fmask')
+#         masktype = 'Fmask'
+# #        if feat.GetField('Fmask_path') != out_raster:
+# #            feat.SetField('Fmask_path', out_raster)
+#         if feat.GetField('MaskType') != masktype:
+#             feat.SetField('MaskType', masktype)
+#             layer.SetFeature(feat)
+#         qafile = out_raster
+#         feat = converttotiles(out_raster, fmaskdir, 'Fmask', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
+    # Pixel QA layer
+    in_raster = os.path.join(outputdir, '{}_QA_PIXEL.{}'.format(ProductID, ext))
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(tdir, '{}_pixel_qa.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(tdir, '{}_pixel_qa.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):
+            print('Reprojecting {} Pixel QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'pixel_qa')
+        masktype = 'Pixel_QA'
+#        if feat.GetField('PixQA_path') != out_raster:
+#            feat.SetField('PixQA_path', out_raster)
+#        mt = feat.GetField('MaskType')
+#        if not mt:
+#            mt = '0'
+        if feat.GetField('MaskType') != masktype:
+            feat.SetField('MaskType', masktype)
+            layer.SetFeature(feat)
+        qafile = out_raster
+        feat = converttotiles(out_raster, pixelqadir, 'pixel_qa', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
+        layer.SetFeature(feat)
+        
+    # Radiometric saturation  QA layer
+    in_raster = os.path.join(outputdir, '{}_QA_RADSAT.{}'.format(ProductID, ext))
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(tdir, '{}_QA_RADSAT.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(tdir, '{}_QA_RADSAT.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):
+            print('Reprojecting {} Radiometric Saturation QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'QA_RADSAT')
+        masktype = 'QA_RADSAT'
+#        if feat.GetField('PixQA_path') != out_raster:
+#            feat.SetField('PixQA_path', out_raster)
+#        mt = feat.GetField('MaskType')
+#        if not mt:
+#            mt = '0'
+        # if feat.GetField('MaskType') != masktype:
+        #     feat.SetField('MaskType', masktype)
+            # layer.SetFeature(feat)
+        # radsatqafile = out_raster
+        feat = converttotiles(out_raster, radsatqadir, 'QA_RADSAT', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
+        layer.SetFeature(feat)
+    
+    # SR QA AEROSOL layer
+    in_raster = os.path.join(outputdir, '{}_SR_QA_AEROSOL.{}'.format(ProductID, ext))
+    if os.access(in_raster, os.F_OK):
+        if useProdID:
+            out_raster = os.path.join(tdir, '{}_SR_QA_AEROSOL.dat'.format(ProductID))
+        else:
+            out_raster = os.path.join(tdir, '{}_SR_QA_AEROSOL.dat'.format(sceneid))
+        if not os.path.isfile(out_raster):
+            print('Reprojecting {} Aerosol QA layer to {}.'.format(sceneid, projection))
+            reproject(in_raster, out_raster, sceneid = sceneid, rastertype = 'SR_QA_AEROSOL')
+        masktype = 'SR_QA_AEROSOL'
+#        if feat.GetField('PixQA_path') != out_raster:
+#            feat.SetField('PixQA_path', out_raster)
+#        mt = feat.GetField('MaskType')
+#        if not mt:
+#            mt = '0'
+        # if feat.GetField('Aerosol_QA_tiles') != masktype:
+        #     feat.SetField('Aerosol_QA_tiles', masktype)
+        #     layer.SetFeature(feat)
+        # aerosolqafile = out_raster
+        feat = converttotiles(out_raster, aerosolqadir, 'SR_QA_AEROSOL', pixelqa = False, feature = feat, overwrite = overwrite, noupdate = noupdate)
+        layer.SetFeature(feat)
+    
+    # Surface reflectance data
+    if useProdID:
+        out_itm = os.path.join(tdir,'{}_ref_{}.dat'.format(ProductID, projacronym))
+    else:
+        out_itm = os.path.join(tdir,'{}_ref_{}.dat'.format(sceneid, projacronym))
+#    if not os.path.isfile(out_itm):
+    print('Compositing surface reflectance bands to single file.')
+    srlist = []
+    out_raster = os.path.join(outputdir, '{}.vrt'.format(sceneid))  # no need to update to ProductID for now- it is a temporary file
+    if not os.path.isfile(out_raster):
+        mergelist = ['gdalbuildvrt', '-separate', out_raster]
+        for band in bands:
+            f = os.path.join(outputdir, '{}_SR_B{}.{}'.format(ProductID, band, ext))
+            fname = scaleVSWIR(f, ext)
+            srlist.append(os.path.basename(fname))
+            if not os.path.isfile(fname):
+                print('Error, {} is missing. Returning.'.format(os.path.basename(fname)))
+                logerror(f, '{} band {} file missing.'.format(ProductID, band))
+                return
+            mergelist.append(fname)
+        p = Popen(mergelist)
+        print(p.communicate())
+    print('Reprojecting {} reflectance data to {}.'.format(sceneid, projection))
+    reproject(out_raster, out_itm, rastertype = 'ref', sceneid = sceneid, parentrasters = srlist)
+#        feat.SetField('SR_path', out_itm) # Update LEDAPS info in shapefile
+    feat = converttotiles(out_itm, srdir, 'ref', pixelqa = True, overwrite = overwrite, feature = feat, noupdate = noupdate)
+    layer.SetFeature(feat)
+
+    # Thermal data
+    print('Processing thermal data.')
+    if not landsat in ['8', '9']:
+#        outbtdir = btdir
+        rastertype = 'Landsat ST'
+        stimg = os.path.join(outputdir,'{}_ST_B6.{}'.format(ProductID, ext))
+        
+    else:
+#        outbtdir = os.path.join(btdir, 'Landsat8')
+        rastertype = 'Landsat ST'
+        stimg = os.path.join(outputdir,'{}_ST_B10.{}'.format(ProductID, ext))
+    parentrasters = [os.path.basename(stimg)]
+    btimg = scaleTIR(stimg, ext)
+        # btimg = os.path.join(outputdir,'{}_BT.vrt'.format(sceneid))
+        # print('Stacking Landsat 8 TIR bands for scene {}.'.format(sceneid))
+        # mergelist = ['gdalbuildvrt', '-separate', btimg]
+        # parentrasters = []
+        # for band in [10, 11]:
+        #     fname = os.path.join(outputdir,'{}_bt_band{}.{}'.format(ProductID, band, ext))
+        #     mergelist.append(fname)
+        #     parentrasters.append(os.path.basename(fname))
+        # p = Popen(mergelist)
+        # print(p.communicate())
+    parentrasters.append(btimg)
+    if btimg:
+        if useProdID:
+            BT_ITM = os.path.join(tdir, '{}_ST_{}.dat'.format(ProductID, projacronym))
+        else:
+            BT_ITM = os.path.join(tdir, '{}_ST_{}.dat'.format(sceneid, projacronym))
+        if not os.path.isfile(BT_ITM):
+            print('Reprojecting {} surface temperature data to {}.'.format(sceneid, projection))
+            reproject(btimg, BT_ITM, rastertype = rastertype, sceneid = sceneid, parentrasters = parentrasters)
+        feat = converttotiles(BT_ITM, stdir, rastertype, pixelqa = True, feature = feat, overwrite = overwrite, noupdate = noupdate)
         layer.SetFeature(feat)
 #        if feat.GetField('BT_path') != BT_ITM:
 #            feat.SetField('BT_path', BT_ITM)

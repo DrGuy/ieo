@@ -1,7 +1,8 @@
 include ieo.py
 include ENVIfile.py
 include *.py
-include config/ieo.ini
-include config/__init__.py
-include data/__init__.py
-include data/*
+include scripts/*
+#include config/ieo.ini
+#include config/__init__.py
+#include data/__init__.py
+#include data/*

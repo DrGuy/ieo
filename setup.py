@@ -4,7 +4,8 @@
 # email: guyserbin <at> eoanalytics <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.3.1
+# version 1.5
+# 3 August 2021: This module now only supports Landsat Collection 2 Level 2 data, and Fmask and brightness temperature data are no longer supported
 
 import os, sys, shutil, glob
 from setuptools import setup, find_packages
@@ -27,6 +28,10 @@ def newinidir(dirname):
 # create configuration for installation if missing
 
 configdir = os.path.join(os.path.dirname(__file__), 'config')
+
+# set environment variable for IEO installation files
+os.environ['IEO_INSTALLDIR'] = os.path.dirname(__file__)
+
 if not os.path.isdir(configdir):
     os.mkdir(configdir)
 
@@ -76,35 +81,43 @@ lcatdir = os.path.join(os.path.dirname(__file__), 'catalog')
 ldatadir = os.path.join(os.path.dirname(__file__), 'data')
 #lgdb = os.path.join(ldatadir, 'ieo.gdb')
 
+dirdict = {'radsat_qa' : 'radsatqadir', 
+           'aerosol_qa' : 'aerosolqadir', 
+           'SR' : 'srdir', 
+           'ST' : 'stdir', 
+           'NDVI' : 'ndvidir', 
+           'EVI' : 'evidir', 
+           'pixel_qa' : 'pixelqadir'}
+
 if not scb: # build a new config file object
     ieo_config = configparser.ConfigParser()
     print('Now creating a new ieo.ini with custom input.')
 
     # DEFAULT section
     ieo_config['DEFAULT'] = {}
-    basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ').strip()
-    landsatdir = input('Please input the base directory for Landsat imagery data (includes Fmask, pixel_qa, SR, BT, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat'))).strip()
-    if len(basedir) == 0:
-        landsatdir = os.path.join(basedir, 'Landsat')
-    for y in ['Fmask', 'SR', 'BT', 'NDVI', 'EVI', 'pixel_qa']:
+    basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')#.strip()
+    # landsatdir = input('Please input the base directory for Landsat imagery data (includes aerosol_qa, radsat_qa, pixel_qa, SR, ST, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat'))).strip()
+    # if len(basedir) == 0:
+    landsatdir = os.path.join(basedir, 'Landsat')
+    for y in dirdict.keys():
         dirname = os.path.join(landsatdir, y)
-        ieo_config['DEFAULT'][y] = dirname
-    y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest')).strip()
-    if len(y) == 0:
-        y = os.path.join(landsatdir, 'Ingest')
+        ieo_config['DEFAULT'][dirdict[y]] = dirname
+    # y = input('Please input the Landsat data ingest directory (will use %s if not set): '%os.path.join(landsatdir, 'Ingest')).strip()
+    # if len(y) == 0:
+    y = os.path.join(landsatdir, 'Ingest')
     ieo_config['DEFAULT']['ingestdir'] = y
-    archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(basedir, 'archive')).strip()
-    if len(archdir) == 0:
-        archdir = os.path.join(basedir, 'archive')
+    # archdir = input('Please input the post-processing tar.gz archive directory (will use %s if not set): '%os.path.join(basedir, 'archive')).strip()
+    # if len(archdir) == 0:
+    archdir = os.path.join(basedir, 'archive')
     ieo_config['DEFAULT']['archdir'] = archdir
-    logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(basedir, 'logs')).strip()
-    if len(logdir) == 0:
-        logdir = os.path.join(basedir, 'logs')
+    # logdir = input('Please input the log directory (will use %s if not set): '%os.path.join(basedir, 'logs')).strip()
+    # if len(logdir) == 0:
+    logdir = os.path.join(basedir, 'logs')
     ieo_config['DEFAULT']['logdir'] = logdir
-    catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(basedir, 'Catalog')).strip()
-    if len(catdir) == 0:
-        catdir = os.path.join(basedir, 'Catalog')
-        ieo_config['DEFAULT']['catdir'] = catdir
+    # catdir = input('Please input the data catalog directory (will use %s if not set): '%os.path.join(basedir, 'Catalog')).strip()
+    # if len(catdir) == 0:
+    catdir = os.path.join(basedir, 'Catalog')
+    ieo_config['DEFAULT']['catdir'] = catdir
 
 #    ieo_config['DEFAULT']['GDBname'] = 'ieo.gdb'
 
@@ -115,11 +128,12 @@ if not scb: # build a new config file object
     # right now these are filled wil IEO defaults. I will write a customisable installer for the upcoming sections later
     # VECTOR section
     
+    ieo_config['catalog'] = {}
     ieo_config['VECTOR'] = {}
     y = input('Please input the base filename for the generic geodata geopackage (will use "ieo.gpkg" if not set): ')
     if len(y) == 0:
         y = 'ieo.gpkg'
-    ieo_config['catalog']['ieogpkg'] = y
+    ieo_config['VECTOR']['ieogpkg'] = y
     y = input('Please input the layer name for the generic Landsat WRS-1 scene polygons (will use Ireland_WRS1_Landsat_1_3_ITM if not set): ')
     if len(y) == 0:
         y = 'Ireland_WRS1_Landsat_1_3_ITM'
@@ -135,9 +149,9 @@ if not scb: # build a new config file object
     y = input('Please input the layer name for the local tile system grid (will use AIRT if not set): ')
     if len(y) == 0:
         y = 'AIRT'
-    ieo_config['VECTOR']['nationaltilesystem'] = 'AIRT'
+    ieo_config['VECTOR']['nationaltilesystem'] = y
     
-    ieo_config['catalog'] = {}
+    
     y = input('Please input the base filename for the scene catalogue geopackage (will use "catalog.gpkg" if not set): ')
     if len(y) == 0:
         y = 'catalog.gpkg'
@@ -184,7 +198,8 @@ if not scb: # build a new config file object
     if len(y) == 0:
         y = '15'
     ieo_config['makegrid']['ytiles'] = y
-    ieo_config.write(ini)
+    with open(ini, 'w') as outini:
+        ieo_config.write(outini)
 else:
     basedir = os.path.dirname(ieo_config['DEFAULT']['catdir'])
     landsatdir = os.path.join(basedir, 'Landsat')
@@ -193,8 +208,16 @@ else:
 landsatcatdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'Landsat')
 basebasedir = os.path.dirname(basedir)
 
+# Set folder for IEO configuration data and environment variable
+outconfigdir = os.path.join(basedir, 'config')
+newinidir(outconfigdir)
+os.environ['IEO_CONFIGDIR'] = outconfigdir
+shutil.copy(ini, os.path.join(outconfigdir, 'ieo.ini'))
+
 # Create missing directories on disk
-for d in [basebasedir, basedir, landsatdir, ieo_config['DEFAULT']['catdir'], landsatcatdir]:
+if not os.path.isdir(basedir):
+    os.makedirs(basedir)
+for d in [landsatdir, ieo_config['DEFAULT']['catdir'], landsatcatdir]:
     newinidir(d)
 for key in ieo_config['DEFAULT'].keys(): # this actually processes some values for the second time, but does nothing if the directories exist
     newinidir(ieo_config['DEFAULT'][key])
@@ -253,7 +276,7 @@ setup(
     name = 'ieo',
 
     # Version number:
-    version = '1.3',
+    version = '1.5',
 
     # Application author details:
     author = 'Guy Serbin',
@@ -278,25 +301,32 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Topic :: Scientific/Engineering :: GIS'
     ],
 
     # Scripts
     # Moves the script to the user's bin directory so that it can be executed.
     # Usage is 'download_espa_order.py' not 'python download_espa_order.py'
-    scripts = ['ieo.py', 'ENVIfile.py'],
+    # scripts = ['ieo.py', 'ENVIfile.py'],
+    scripts = ['scripts/GetLandsatL2', 'scripts/makevrts', 'scripts/newlandsatimport', 'scripts/updatelandsat'],
 #    include_package_data = True,
 
 #    packages = find_packages(include = ['config', 'data']),
-    packages = ['config', 'data'],
-    package_data = {'config': ['*',], 'data': ['*',]},
+    # packages = ['config', 'data'],
+    py_modules = ['ieo', 'ENVIfile'],
+    # packages = ['ieo'],
+    # package_dir={'ieo': 'src'},
+    # package_data = {'config': ['*',], 'data': ['*',]},
     #package_data = {'config': ['*',],}, #  'data': ['*',], 'data/ieo.gdb': ['*',]
     # Dependent packages (distributions)
     install_requires = [
         'numexpr',
         'numpy',
         'gdal>=2',
-        'pillow'
+        'pillow', 
+        'requests'
     ],
     project_urls = {
         'Documentation': 'https://readthedocs.org/projects/ieo/',

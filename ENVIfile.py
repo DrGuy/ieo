@@ -17,7 +17,13 @@ else:
 # Read in config information
 global prjval, projinfo, mapinfostr, gcsstring, prj
 config = configparser.ConfigParser()
-config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
+ieoconfigdir = os.getenv('IEO_CONFIGDIR')
+if ieoconfigdir:
+    configfile = os.path.join(ieoconfigdir, 'ieo.ini')
+else:
+    configfile = 'config/ieo.ini'
+config_location = resource_filename(Requirement.parse('ieo'), configfile)
+# config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
 config.read(config_location) # config_path
 
 # Spatial variables
@@ -89,6 +95,27 @@ headerdict['pixel_qa'].update({
     'defaultbasefilename': '%s_pixel_qa.dat', # sceneid
     'data ignore value': 1})
 
+headerdict['SR_QA_AEROSOL'] = headerdict['default'].copy() # Added in version 1.5 
+headerdict['SR_QA_AEROSOL'].update({
+    'description': 'Landsat Aerosol QA Layer %s',  # sceneid
+    'band names': ['Aerosol QA'], # sceneid
+    'defaultbasefilename': '%s_SR_QA_AEROSOL.dat', # sceneid
+    'data ignore value': 1})
+
+headerdict['QA_RADSAT'] = headerdict['default'].copy() # Added in version 1.5 
+headerdict['QA_RADSAT'].update({
+    'description': 'Landsat Radiometric Saturation QA Layer %s',  # sceneid
+    'band names': ['RADSAT QA'], # sceneid
+    'defaultbasefilename': '%s_QA_RADSAT.dat', # sceneid
+    })
+
+headerdict['Landsat ST'] = headerdict['default'].copy() # Added in version 1.5
+headerdict['Landsat ST'].update({
+    'description': 'Landsat Surface Temperature (%s)',  # sceneid
+    'band names': ['Surface Temperature'], # sceneid
+    'defaultbasefilename': '%s_ST.dat', # sceneid
+    'data ignore value': -9999}) 
+
 headerdict['Landsat Band6'] = headerdict['default'].copy()
 headerdict['Landsat Band6'].update({
     'description': 'LEDAPS Brightness Temperature (%s)',  # sceneid
@@ -101,7 +128,7 @@ headerdict['Landsat Band6'].update({
 
 headerdict['Landsat TIR'] = headerdict['default'].copy()
 headerdict['Landsat TIR'].update({
-    'description': 'LEDAPS Brightness Temperature (%s)',  # sceneid
+    'description': 'Landsat Brightness Temperature (%s)',  # sceneid
     'band names': ['TIR 1', 'TIR 2'], # sceneid
     'wavelength': [10.895000, 12.005000],
     'wavelength units': 'Micrometers',
@@ -111,7 +138,7 @@ headerdict['Landsat TIR'].update({
 
 headerdict['Landsat TM'] = headerdict['default'].copy()
 headerdict['Landsat TM'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.485000, 0.560000, 0.662000, 0.830000, 1.648000, 2.215000],
     'wavelength units': 'Micrometers',
@@ -122,7 +149,7 @@ headerdict['Landsat TM'].update({
 
 headerdict['Landsat ETM+'] = headerdict['default'].copy()
 headerdict['Landsat ETM+'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.483000, 0.560000, 0.662000, 0.835000, 1.648000, 2.206000],
     'wavelength units': 'Micrometers',
@@ -133,7 +160,7 @@ headerdict['Landsat ETM+'].update({
 
 headerdict['Landsat OLI'] = headerdict['default'].copy()
 headerdict['Landsat OLI'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.443000, 0.482600, 0.561300, 0.654600, 0.864600, 1.609000, 2.201000],
     'wavelength units': 'Micrometers',
@@ -144,7 +171,7 @@ headerdict['Landsat OLI'].update({
     
 headerdict['Landsat MSS'] = headerdict['default'].copy()
 headerdict['Landsat MSS'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Green', 'Red', 'Red Edge', 'NIR'], # sceneid
     'wavelength': [0.55, 0.65, 0.75, 0.95],
     'wavelength units': 'Micrometers',
@@ -155,7 +182,7 @@ headerdict['Landsat MSS'].update({
 
 headerdict['Sentinel-2'] = headerdict['default'].copy()
 headerdict['Sentinel-2'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Sentinel-2 Surface Reflectance (%s)',  # sceneid
     'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR broad', 'NIR narrow', 'NIR water vapor', 'Cirrus', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.375, 1.61, 2.19],
     'wavelength units': 'Micrometers',
