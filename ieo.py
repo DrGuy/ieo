@@ -1692,7 +1692,13 @@ def importespatotiles(f, *args, **kwargs):
                 i = f.find('.tar')
             outputdir = f[:i]
             ProductID = os.path.basename(outputdir)
-        filelist = untarfile(f, outputdir)
+        try:
+            filelist = untarfile(f, outputdir)
+        except Exception as e:
+            print('An error has occurred extracting tarfile: {}'.format(os.path.basename(f)))
+            print(e)
+            logerror(os.path.basename(f), e)
+            return
     else:
         filelist = glob.glob(os.path.join(dirname, '*'))
         outputdir = dirname
@@ -2022,6 +2028,6 @@ def untarfile(file, outdir):
     except Exception as e:
         logerror(file, e)
         print(e)
-        tar.close()
+        # tar.close()
         os.remove(file) # delete bad tar.gz
         return 0
