@@ -1047,6 +1047,7 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     sceneid = basename[:i] # This will now use either the SceneID or ProductID
     acqtime = envihdracqtime(refitm.replace('.dat', '.hdr'))
     qafile = kwargs.get('qafile', os.path.join(pixelqadir,'{}_QA_PIXEL.dat'.format(sceneid)))
+    outdir = kwargs.get('outdir', dirname)
     # fmaskfile = os.path.join(fmaskdir,'{}_cfmask.dat'.format(sceneid))
     parentrasters = [os.path.basename(refitm)]
     # if useqamask:
@@ -1100,12 +1101,12 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     # NDVI calculation
     NDVI = NDindex(NIR, red, fmask = fmask)
     parentrasters = makeparentrastersstring(parentrasters)
-    ENVIfile(NDVI, 'NDVI', outdir = ndvidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+    ENVIfile(NDVI, 'NDVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
     NDVI = None
 
     # EVI calculation
     evi = EVI(blue, red, NIR, fmask = fmask)
-    ENVIfile(evi, 'EVI', outdir = evidir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+    ENVIfile(evi, 'EVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
     evi = None
 
     NIR = None
