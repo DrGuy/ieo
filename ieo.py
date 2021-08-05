@@ -1705,10 +1705,11 @@ def importespatotiles(f, *args, **kwargs):
     tdir = os.path.join(outputdir, projacronym)
     if not os.path.isdir(tdir):
         os.mkdir(tdir)
-    if isinstance(filelist, int) or len(filelist) == 0:
+    if isinstance(filelist, int):
         print('ERROR: there is a problem with the files, skipping.')
-        if len(filelist) == 0:
-            logerror(f, 'No files found.')
+        return
+    elif len(filelist) == 0:
+        logerror(f, 'No files found.')
         return
 
     
@@ -1942,14 +1943,14 @@ def importespatotiles(f, *args, **kwargs):
 
     # Clean up files.
 
-    if basename.endswith('.tar.gz'):
+    if basename.endswith('.tar.gz') or basename.endswith('.tar'):
         print('Moving {} to archive: {}'.format(basename, archdir))
         if not os.access(os.path.join(archdir, os.path.basename(f)), os.F_OK):
             shutil.move(f, archdir)
     if remove:
         print('Cleaning up files in directory.')
         for d in [tdir, outputdir]:
-            filelist = glob.glob(os.path.join(d, '{}*.*'.format(sceneid)))
+            filelist = glob.glob(os.path.join(d, '*.*'))
             try:
                 for fname in filelist:
                     if os.access(fname, os.F_OK):
