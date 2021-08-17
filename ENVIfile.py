@@ -17,11 +17,11 @@ else:
 # Read in config information
 global prjval, projinfo, mapinfostr, gcsstring, prj
 config = configparser.ConfigParser()
-ieoconfigdir = os.getenv('IEO_CONFIGDIR')
-if ieoconfigdir:
-    configfile = os.path.join(ieoconfigdir, 'ieo.ini')
-else:
-    configfile = 'config/ieo.ini'
+# ieoconfigdir = os.getenv('IEO_CONFIGDIR')
+# if ieoconfigdir:
+#     configfile = os.path.join(ieoconfigdir, 'ieo.ini')
+# else:
+configfile = 'config/ieo.ini'
 config_location = resource_filename(Requirement.parse('ieo'), configfile)
 # config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
 config.read(config_location) # config_path

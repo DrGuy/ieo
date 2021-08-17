@@ -37,10 +37,10 @@ from urllib.parse import urlparse
 try:
     import ieo
 except:
-    ieodir = os.getenv('IEO_INSTALLDIR')
-    if not ieodir:
-        print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
-        ieodir = input('IEO installation path: ')
+    # ieodir = os.getenv('IEO_INSTALLDIR')
+    # if not ieodir:
+    print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
+    ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
         sys.path.append(ieodir)
         import ieo
@@ -642,7 +642,10 @@ def queryUSGS(baseURL, version, headers, scenedict, badgeom, updatemissing, \
         # Save query results?
         if savequeries:
             now = datetime.datetime.now()
-            outfile = os.path.join(ieo.ingestdir, 'query_{}_{}.txt'.format(datasetName, now.strftime('%Y%m%d-%H%M%S')))
+            querydir = os.path.join(ieo.logdir, 'json_query_data')
+            if not os.path.isdir(querydir):
+                os.mkdir(querydir)
+            outfile = os.path.join(querydir, 'query_{}_{}.txt'.format(datasetName, now.strftime('%Y%m%d-%H%M%S')))
             with open(outfile, 'w') as output:
                 output.write(query.text)
 
@@ -1017,7 +1020,10 @@ def readUSGS(baseURL, version, headers, \
             # Save query results?
             if savequeries:
                 now = datetime.datetime.now()
-                outfile = os.path.join(ieo.ingestdir, 'query_{}_{}_{}_{}.txt'.format(datasetName, startdate, enddate, now.strftime('%Y%m%d-%H%M%S')))
+                querydir = os.path.join(ieo.logdir, 'json_query_data')
+                if not os.path.isdir(querydir):
+                    os.mkdir(querydir)
+                outfile = os.path.join(querydir, 'query_{}_{}_{}_{}.txt'.format(datasetName, startdate, enddate, now.strftime('%Y%m%d-%H%M%S')))
                 with open(outfile, 'w') as output:
                     output.write(response.text)
             
@@ -1065,7 +1071,7 @@ def readUSGS(baseURL, version, headers, \
                     #         modifiedDate = datetime.datetime.strptime(json_data['data']['results'][i]['metadata']['Date Product Generated L2'], '%Y-%m-%d %H:%M:%S')
                     
                     scenedict[sceneID] = {'Landsat Product Identifier': json_data['data']['results'][i]["displayId"],
-                             "browseUrl": json_data['data']['results'][i]["browse"][0]["thumbnailPath"],
+                             # "browseUrl": json_data['data']['results'][i]["browse"][0]["thumbnailPath"],
                              # "dataAccessUrl": json_data['data']['results'][i]["dataAccessUrl"],
                              # "downloadUrl": json_data['data']['results'][i]["downloadUrl"],
                              # "metadataUrl": json_data['data']['results'][i]["metadataUrl"],

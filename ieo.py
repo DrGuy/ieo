@@ -16,18 +16,18 @@ from pkg_resources import resource_stream, resource_string, resource_filename, R
 from ENVIfile import *
 
 # Import GDAL
-if not 'linux' in sys.platform: # this way I can use the same library for processing on multiple systems
+# if not 'linux' in sys.platform: # this way I can use the same library for processing on multiple systems
     # if sys.version_info[0] !=3: # Attempt to load ArcPy and EnviPy libraries, if not, use GDAL.
     #     try:
     #         from arcenvipy import *
     #     except:
     #         print('There was an error loading either ArcPy or EnviPy. Functions requiring this library will not be available.')
-    from osgeo import gdal, ogr, osr
+from osgeo import gdal, ogr, osr
 
-else: # Note- this hasn't been used or tested with Linux in a long time. It probably doesn't work.
-    import gdal, ogr, osr
-    sys.path.append('/usr/bin')
-    sys.path.append('/usr/local/bin')
+# else: # Note- this hasn't been used or tested with Linux in a long time. It probably doesn't work.
+#     import gdal, ogr, osr
+#     sys.path.append('/usr/bin')
+#     sys.path.append('/usr/local/bin')
 
 # Set some global variables
 global pixelqadir, aerosolqadir, radsatqadir, srdir, stdir, ingestdir, ndvidir, evidir, archdir, catdir, logdir, NTS, Sen2tiles, prjstr, WRS1, WRS2, defaulterrorfile, gdb_path, landsatshp, prj, projacronym, useProductID
@@ -42,11 +42,11 @@ pythondir = os.path.dirname(sys.executable)
 
 # Access configuration data inside Python egg
 config = configparser.ConfigParser()
-ieoconfigdir = os.getenv('IEO_CONFIGDIR')
-if ieoconfigdir:
-    configfile = os.path.join(ieoconfigdir, 'ieo.ini')
-else:
-    configfile = 'config/ieo.ini'
+# ieoconfigdir = os.getenv('IEO_CONFIGDIR')
+# if ieoconfigdir:
+#     configfile = os.path.join(ieoconfigdir, 'ieo.ini')
+# else:
+configfile = 'config/ieo.ini'
 config_location = resource_filename(Requirement.parse('ieo'), configfile)
 config.read(config_location) # config_path
 # fmaskdir = config['DEFAULT']['fmaskdir'] # Deprecated in version 1.5
@@ -1192,8 +1192,8 @@ def importespa(f, *args, **kwargs):
             logerror(f, 'No files found.')
         return
 
-    if any(x.endswith('.tif') for x in filelist):
-        ext = 'tif'
+    if any(x.endswith('.tif'.lower()) for x in filelist):
+        ext = 'TIF'
     else:
         ext = 'img'
     xml = glob.glob(os.path.join(outputdir, '*.xml'))
@@ -1714,7 +1714,7 @@ def importespatotiles(f, *args, **kwargs):
         return
 
     
-    ext = 'tif'
+    ext = 'TIF'
     # if any(x.endswith('.tif') for x in filelist):
     #     ext = 'tif'
     # else:
@@ -1859,12 +1859,12 @@ def importespatotiles(f, *args, **kwargs):
     if not os.path.isfile(out_raster):
         mergelist = ['gdalbuildvrt', '-separate', out_raster]
         for band in bands:
-            f = os.path.join(outputdir, '{}_SR_B{}.{}'.format(ProductID, band, ext))
-            fname = scaleVSWIR(f, ext)
+            fb = os.path.join(outputdir, '{}_SR_B{}.{}'.format(ProductID, band, ext))
+            fname = scaleVSWIR(fb, ext)
             srlist.append(os.path.basename(fname))
             if not os.path.isfile(fname):
                 print('Error, {} is missing. Returning.'.format(os.path.basename(fname)))
-                logerror(f, '{} band {} file missing.'.format(ProductID, band))
+                logerror(fb, '{} band {} file missing.'.format(ProductID, band))
                 return
             mergelist.append(fname)
         p = Popen(mergelist)

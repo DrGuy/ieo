@@ -98,7 +98,7 @@ if not scb: # build a new config file object
     basedir = input('Please input the base directory for all imagery data (Landsat, Sentinel-2, etc.): ')#.strip()
     # landsatdir = input('Please input the base directory for Landsat imagery data (includes aerosol_qa, radsat_qa, pixel_qa, SR, ST, NDVI, EVI subdirectories, will use {} if not set): '.format(os.path.join(basedir, 'Landsat'))).strip()
     # if len(basedir) == 0:
-    landsatdir = os.path.join(basedir, 'Landsat')
+    landsatdir = os.path.join(basedir, 'landsat')
     for y in dirdict.keys():
         dirname = os.path.join(landsatdir, y)
         ieo_config['DEFAULT'][dirdict[y]] = dirname
@@ -202,10 +202,10 @@ if not scb: # build a new config file object
         ieo_config.write(outini)
 else:
     basedir = os.path.dirname(ieo_config['DEFAULT']['catdir'])
-    landsatdir = os.path.join(basedir, 'Landsat')
+    landsatdir = os.path.join(basedir, 'landsat')
 
 
-landsatcatdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'Landsat')
+landsatcatdir = os.path.join(ieo_config['DEFAULT']['catdir'], 'landsat')
 basebasedir = os.path.dirname(basedir)
 
 # Set folder for IEO configuration data and environment variable
@@ -310,7 +310,7 @@ setup(
     # Moves the script to the user's bin directory so that it can be executed.
     # Usage is 'download_espa_order.py' not 'python download_espa_order.py'
     # scripts = ['ieo.py', 'ENVIfile.py'],
-    scripts = ['scripts/GetLandsatL2', 'scripts/makevrts', 'scripts/newlandsatimport', 'scripts/updatelandsat'],
+    scripts = ['scripts/GetLandsatL2.py', 'scripts/makevrts.py', 'scripts/newlandsatimport.py', 'scripts/updatelandsat.py'],
 #    include_package_data = True,
 
 #    packages = find_packages(include = ['config', 'data']),

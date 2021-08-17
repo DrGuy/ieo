@@ -11,16 +11,16 @@
 
 # This script uses code from https://m2m.cr.usgs.gov/api/docs/example/download_landsat_c2-py
 
-import os, sys, glob, datetime, argparse, requests, threading, re, json #, ieo
+import os, sys, glob, datetime, argparse, requests, threading, re, json, time #, ieo
 from osgeo import ogr, osr
 
 try: # This is included as the module may not properly install in Anaconda.
     import ieo
 except:
-    ieodir = os.getenv('IEO_INSTALLDIR')
-    if not ieodir:
-        print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
-        ieodir = input('IEO installation path: ')
+    # ieodir = os.getenv('IEO_INSTALLDIR')
+    # if not ieodir:
+    print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
+    ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
         sys.path.append(ieodir)
         import ieo
@@ -637,7 +637,7 @@ if __name__ == '__main__':
                 # Don't get all download urls, retrieve again after 30 seconds
                 while len(preparingDownloadIds) > 0: 
                     print(f"{len(preparingDownloadIds)} downloads are not available yet. Waiting for 30s to retrieve again\n")
-                    datetime.time.sleep(30)
+                    time.sleep(30)
                     results = sendRequest(serviceUrl + "download-retrieve", payload, apiKey, False)
                     if results != False:
                         for result in results['available']:                            
