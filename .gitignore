@@ -101,3 +101,10 @@ ieo.egg-info/PKG-INFO
 ieo.egg-info/requires.txt
 ieo.egg-info/SOURCES.txt
 ieo.egg-info/top_level.txt
+build/lib/S3ObjectStorage.py
+__pycache__/S3ObjectStorage.cpython-39.pyc
+ieo.egg-info/dependency_links.txt
+ieo.egg-info/PKG-INFO
+ieo.egg-info/requires.txt
+ieo.egg-info/SOURCES.txt
+ieo.egg-info/top_level.txt

@@ -3,5 +3,5 @@
 
 __author__ = "Guy Serbin"
 __version__ = "1.5"
-__all__ = ["ieo", "ENVIfile"]
+__all__ = ["ieo", "ENVIfile", "S3ObjectStorage"]
 __main__ = "ieo"

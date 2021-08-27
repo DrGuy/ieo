@@ -936,11 +936,16 @@ def readUSGS(baseURL, version, headers, \
         # Override the start dates with the last modified date in the IEO catalog
         #    - unless there are catalog entries (features) which have been flagged 
         #         for update
-        if lastmodifiedDate and not (len(updatemissing) > 0 or len(badgeom) > 0):
-            coll_startdate = lastmodifiedDate
-        else:
-            coll_startdate = startdate
-        
+        # if lastmodifiedDate and not (len(updatemissing) > 0 or len(badgeom) > 0):
+        #     coll_startdate = lastmodifiedDate
+        # else:
+        #     coll_startdate = startdate
+        # if startdate:
+        #     coll_startdate = startdate
+        # else:
+        #     coll_startdate = datasetNames[datasetName]
+        coll_startdate = datasetNames[datasetName]
+            
         # Ensure that the date separator is - instead of /
         if '/' in coll_startdate:
             coll_startdate = coll_startdate.replace('/', '-')

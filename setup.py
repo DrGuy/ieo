@@ -315,7 +315,7 @@ setup(
 
 #    packages = find_packages(include = ['config', 'data']),
     # packages = ['config', 'data'],
-    py_modules = ['ieo', 'ENVIfile'],
+    py_modules = ['ieo', 'ENVIfile', 'S3ObjectStorage'],
     # packages = ['ieo'],
     # package_dir={'ieo': 'src'},
     # package_data = {'config': ['*',], 'data': ['*',]},
