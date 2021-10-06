@@ -116,7 +116,21 @@ def runDownload(threads, url):
 # 
 
 def getscenedata(layer, localscenelist):
-    scenedata = {}
+    scenedata = {'ProductIDs' : {}}
+    # if ieo.useS3:
+    #     scenedata['ingested'] = []
+        # bucketdict = ieo.getbucketobjects(ieo.archivebucket)
+        # if len(bucketdict['landsat'].keys()) > 0:
+        #     for year in bucketdict.keys():
+        #         if len(year.keys()) > 0:
+        #             for month in year.keys():
+        #                 if len(month.keys()) > 0:
+        #                     for day in month.keys():
+        #                         if isinstance(day, list):
+        #                             if len(day) > 0:
+        #                                 for item in day:
+        #                                     i = item.find('.')
+        #                                     scenedata['ingested'].append(item[:i])
     for feature in layer:
         sceneID = feature.GetField("sceneID")
         ProductID = feature.GetField('LANDSAT_PRODUCT_ID_L2')
@@ -142,6 +156,7 @@ def getscenedata(layer, localscenelist):
         # if sunEl: # ignore Null values
         if includescene: # and sunEl >= args.minsunel:
             SR_file = feature.GetField('Surface_reflectance_tiles')
+            scenedata['ProductIDs'][ProductID] = sceneID
             scenedata[sceneID] = {'LANDSAT_PRODUCT_ID_L2' : ProductID,
                                     'acquisitionDate' : acqDate, 
                                     'Path' : feature.GetField("path"), 
@@ -153,9 +168,25 @@ def getscenedata(layer, localscenelist):
                                     'Surface_reflectance_tiles' : SR_file, 
                                     'proclevel' : proclevel
                                     }
-            if SR_file and not args.usesrdir:
+            if args.verbose:
+                        print('SR_file: {}.'.format(SR_file))
+            if not SR_file == None:
+                if len(SR_file) > 0:
+                    if args.verbose:
+                        print('Adding {} to local scene list.'.format(sceneID))
+                    localscenelist.append(sceneID[:16])
+            elif ieo.useS3:
+                if not ProductID in localscenelist:
+                    if args.verbose:
+                        print('Adding {} to local scene list.'.format(ProductID))
+                    localscenelist.append(ProductID)
+            elif SR_file and not args.usesrdir:
                 if os.path.isfile(SR_file):
-                    localscenelist.append(os.path.basename(SR_file)[:16])
+                    if args.verbose:
+                        print('Adding {} to local scene list.'.format(sceneID))
+                    localscenelist.append(sceneID[:16])
+    if args.verbose:
+        print('Total locally ingested scenes: {}'.format(len(localscenelist)))
     return scenedata, localscenelist
 
 def scenesearch(scenedata, sceneID, pathrowdict): # This function is still Ireland specific
@@ -180,33 +211,34 @@ def scenesearch(scenedata, sceneID, pathrowdict): # This function is still Irela
 
 def findmissing(procdict, scenedata, localscenelist, cctype):
     keys = scenedata.keys()
-    for sceneID in keys:
-        if not sceneID[:16] in localscenelist:
-            try:
-                if sceneID[2:3] == '8' and any(sceneID[9:16] in key for key in procdict['8']['scenelist']) and (not any(sceneID in key for key in procdict['8']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
-                    print('Adding {} to Landsat 8 download list.'.format(sceneID))
-    #                if not sceneID[9:16] in l8.keys() and any(sceneID[9:16] == key[9:16] for key in l8.keys()):
-    #                    l8[sceneID[9:16]] = [sceneID]
-    #                else:
-                    procdict['8']['scenelist'].append(sceneID)
-                elif sceneID[2:3] == '7' and any(sceneID[9:16] in key for key in procdict['7']['scenelist']) and (not any(sceneID in key for key in procdict['7']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
-                    print('Adding {} to Landsat 7 download list.'.format(sceneID))
-    #                if not sceneID[9:16] in l47.keys():
-    #                    l47[sceneID[9:16]] = [sceneID]
-    #                else:
-                    procdict['7']['scenelist'].append(sceneID) 
-                elif (sceneID[2:3] == '4' or sceneID[2:3] == '5') and any(sceneID[9:16] in key for key in procdict['4-5']['scenelist']) and (not any(sceneID in key for key in procdict['4-5']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
-                    print('Adding {} to Landsat 4-5 download list.'.format(sceneID))
-    #                if not sceneID[9:16] in l47.keys():
-    #                    l47[sceneID[9:16]] = [sceneID]
-    #                else:
-                    procdict['4-5']['scenelist'].append(sceneID) 
-            except Exception as e:
-                exc_type, exc_obj, exc_tb = sys.exc_info()
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                print(exc_type, fname, exc_tb.tb_lineno)
-                print('ERROR: {} {} {} {}.'.format(sceneID, exc_type, fname, exc_tb.tb_lineno))
-                ieo.logerror(sceneID, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
+    for sceneID in keys:        
+        if sceneID != 'ProductIDs':
+            if (not sceneID[:16] in localscenelist) or (ieo.useS3 and (not sceneID['LANDSAT_PRODUCT_ID_L2'] in localscenelist)):
+                try:
+                    if sceneID[2:3] == '8' and any(sceneID[9:16] in key for key in procdict['8']['scenelist']) and (not any(sceneID in key for key in procdict['8']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
+                        print('Adding {} to Landsat 8 download list.'.format(sceneID))
+        #                if not sceneID[9:16] in l8.keys() and any(sceneID[9:16] == key[9:16] for key in l8.keys()):
+        #                    l8[sceneID[9:16]] = [sceneID]
+        #                else:
+                        procdict['8']['scenelist'].append(sceneID)
+                    elif sceneID[2:3] == '7' and any(sceneID[9:16] in key for key in procdict['7']['scenelist']) and (not any(sceneID in key for key in procdict['7']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
+                        print('Adding {} to Landsat 7 download list.'.format(sceneID))
+        #                if not sceneID[9:16] in l47.keys():
+        #                    l47[sceneID[9:16]] = [sceneID]
+        #                else:
+                        procdict['7']['scenelist'].append(sceneID) 
+                    elif (sceneID[2:3] == '4' or sceneID[2:3] == '5') and any(sceneID[9:16] in key for key in procdict['4-5']['scenelist']) and (not any(sceneID in key for key in procdict['4-5']['scenelist'])) and scenedata[sceneID][cctype] < 100.0:
+                        print('Adding {} to Landsat 4-5 download list.'.format(sceneID))
+        #                if not sceneID[9:16] in l47.keys():
+        #                    l47[sceneID[9:16]] = [sceneID]
+        #                else:
+                        procdict['4-5']['scenelist'].append(sceneID) 
+                except Exception as e:
+                    exc_type, exc_obj, exc_tb = sys.exc_info()
+                    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                    print(exc_type, fname, exc_tb.tb_lineno)
+                    print('ERROR: {} {} {} {}.'.format(sceneID, exc_type, fname, exc_tb.tb_lineno))
+                    ieo.logerror(sceneID, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
 #        sc = scenesearch(scenedata, sceneID)
 #        if len(sc) > 0:
 #            for s in sc:
@@ -221,128 +253,132 @@ def findmissing(procdict, scenedata, localscenelist, cctype):
 
 def populatelists(procdict, scenedata, localscenelist):
     for sceneID in scenedata.keys():
-        acqDate = scenedata[sceneID]['acquisitionDate']
-        path = scenedata[sceneID]['Path']
-        row = scenedata[sceneID]['Row']
-        scenesensor = scenedata[sceneID]['SensorID']
-        if args.ccland:
-            cc = scenedata[sceneID]['CLOUD_COVER_LAND']
-            if not cc:
-                cc = 0.0
-            maxcc = args.maxccland
-            cctype = 'CLOUD_COVER_LAND'
-        else:
-            cc = scenedata[sceneID]['cloudCoverFull']
-            if not cc:
-                cc = 0.0
-            maxcc = args.maxcc
-            cctype = 'cloudCoverFull' 
-        if cc == None:
-            cc = 0.0
-        # sunEl = scenedata[sceneID]['sunElevation']
-#        SR = scenedata[sceneID]['Surface_reflectance_tiles']
-        proclevel = scenedata[sceneID]['proclevel']
-        
-        try:
-            if (not any(sceneID[:16] in x for x in localscenelist) or args.ignorelocal) and (cc <= maxcc) and (proclevel in proclevels): # and (sunEl >= args.minsunel) # Only run this for scenes that aren't present on disk or if we choose to ignore local copies.
-            # if (feature.GetField("SR_path") == None or args.ignorelocal) and feature.GetField("CCFull") <= args.maxcc and feature.GetField("sunEl") >= args.minsunel:
-                # sceneID = feature.GetField("sceneID")
-                if args.landsat:
-                    if args.landsat != int(sceneID[2:3]):
-                        continue
-                if args.path:
-                    if args.path != path:
-                        continue
-                    # else:
-                    #     print(path)
-                if args.row:
-                    if args.row != row:
-                        continue
-                    # else:
-                    #     print(row)
-                if args.sensor: 
-                    if sensor != scenesensor:
-                        continue
-                
-                year = int(sceneID[9:13])
-                doy = int(sceneID[13:16])    
-                if args.startyear or args.endyear:
-                    if args.startyear > args.endyear:
-                        endyear = args.startyear
-                        startyear = args.endyear
-                    else: 
-                        endyear = args.endyear
-                        startyear = args.startyear
-                    if year < startyear or year > endyear:
-                        continue
-                if args.startdoy and args.enddoy: # This might be programmed later to restrict dates to specific dates/ times of year
-                    if args.startdoy < args.enddoy:
-                        if doy < args.startdoy or doy > args.enddoy:
+        if sceneID != 'ProductsIDs':
+            try:
+                if args.ignorelocal:
+                    print('Ignoring local files.')
+                    localscenelist = []
+                acqDate = scenedata[sceneID]['acquisitionDate']
+                path = scenedata[sceneID]['Path']
+                row = scenedata[sceneID]['Row']
+                scenesensor = scenedata[sceneID]['SensorID']
+                if args.ccland:
+                    cc = scenedata[sceneID]['CLOUD_COVER_LAND']
+                    if not cc:
+                        cc = 0.0
+                    maxcc = args.maxccland
+                    cctype = 'CLOUD_COVER_LAND'
+                else:
+                    cc = scenedata[sceneID]['cloudCoverFull']
+                    if not cc:
+                        cc = 0.0
+                    maxcc = args.maxcc
+                    cctype = 'cloudCoverFull' 
+                if cc == None:
+                    cc = 0.0
+                # sunEl = scenedata[sceneID]['sunElevation']
+        #        SR = scenedata[sceneID]['Surface_reflectance_tiles']
+                proclevel = scenedata[sceneID]['proclevel']
+            
+                if ((not sceneID[:16] in localscenelist and not ieo.useS3) or (ieo.useS3 and sceneID not in localscenelist)) and (cc <= maxcc) and (proclevel in proclevels): # and (sunEl >= args.minsunel) # Only run this for scenes that aren't present on disk or if we choose to ignore local copies.
+                # if (feature.GetField("SR_path") == None or args.ignorelocal) and feature.GetField("CCFull") <= args.maxcc and feature.GetField("sunEl") >= args.minsunel:
+                    # sceneID = feature.GetField("sceneID")
+                    if args.landsat:
+                        if args.landsat != int(sceneID[2:3]):
                             continue
-                    else:
-                        if args.startyear: 
-                            if year == startyear and doy < args.startdoy:
-                                continue
-                        if args.endyear:
-                            if year == endyear and doy > args.enddoy:
-                                continue
-                        if doy > args.enddoy and doy < args.startdoy:
+                    if args.path:
+                        if args.path != path:
                             continue
-                
-                if (acqDate >= args.startdate) and (acqDate <= args.enddate):
-    #               
-                    print('Scene {}, cloud cover of {} percent, added to list.'.format(sceneID, cc))
-                    if sceneID[2:3] == '4' or sceneID[2:3] == '5':
-                        i = '4-5'
-                    else:
-                        i = sceneID[2:3]
-                    if not sceneID in procdict[i]['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
-                        procdict[i]['scenelist'].append(sceneID)
-                        if args.allinpath:
-                            sc = scenesearch(scenedata, sceneID, pathrowdict)
-                            if len(sc) > 0:
-                                for s in sc:
-                                    if not s in procdict[i]['scenelist']:
-                                        print('Also adding scene {} to the processing list.'.format(sceneID))
-                                        procdict[i]['scenelist'].append(s)
-                    # elif sceneID[2:3] == '7' and not sceneID in procdict['7']['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
-                    #     procdict['7']['scenelist']
-                    # elif (sceneID[2:3] == '4' or sceneID[2:3] == '5') and not sceneID in procdict['4-5']['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
-                    #     procdict['4-5']['scenelist']
-                    # # if not sceneID[9:16] in l47.keys():
-                    # #         l47[sceneID[9:16]] = [sceneID]
-                    # #     elif not sceneID in l47[sceneID[9:16]]:
-                    # #         l47[sceneID[9:16]].append(sceneID)
-                    #     if args.allinpath:
-                    #         sc = scenesearch(scenedata, sceneID, pathrowdict)
-                    #         if len(sc) > 0:
-                    #             for s in sc:
-                    #                 if not s in l47[sceneID[9:16]]:
-                    #                     print('Also adding scene {} to the processing list.'.format(sceneID))
-                    #                     l47[sceneID[9:16]].append(s)
-                        
-            #        elif scenesensor=='LANDSAT_ETM':
-            #            l7.append(sceneID)
-            #        elif scenesensor=='LANDSAT_ETM_SLC_OFF' and not sceneID[9:16] in L7exclude:
-            #            l7slcoff.append(sceneID)
-                    # elif sceneID[2:3] == '8' and not sceneID[9:16] in L8exclude:
-                    #     if not sceneID[9:16] in l8.keys():
-                    #         l8[sceneID[9:16]] = [sceneID]
-                    #     elif not sceneID in l8[sceneID[9:16]]:
-                    #         l8[sceneID[9:16]].append(sceneID)
-                    #     if args.allinpath:
-                    #         sc = scenesearch(scenedata, sceneID, pathrowdict)
-                    #         if len(sc) > 0:
-                    #             for s in sc:
-                    #                 if not s in l8[sceneID[9:16]]:
-                    #                     print('Also adding scene {} to the processing list.'.format(sceneID))
-                    #                     l8[sceneID[9:16]].append(s)
-        except Exception as e:
-            exc_type, exc_obj, exc_tb = sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print(exc_type, fname, exc_tb.tb_lineno)
-            print('ERROR: {} {} {} {}.'.format(sceneID, exc_type, fname, exc_tb.tb_lineno))
-            ieo.logerror(sceneID, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
+                        # else:
+                        #     print(path)
+                    if args.row:
+                        if args.row != row:
+                            continue
+                        # else:
+                        #     print(row)
+                    if args.sensor: 
+                        if sensor != scenesensor:
+                            continue
+                    
+                    year = int(sceneID[9:13])
+                    doy = int(sceneID[13:16])    
+                    if args.startyear or args.endyear:
+                        if args.startyear > args.endyear:
+                            endyear = args.startyear
+                            startyear = args.endyear
+                        else: 
+                            endyear = args.endyear
+                            startyear = args.startyear
+                        if year < startyear or year > endyear:
+                            continue
+                    if args.startdoy and args.enddoy: # This might be programmed later to restrict dates to specific dates/ times of year
+                        if args.startdoy < args.enddoy:
+                            if doy < args.startdoy or doy > args.enddoy:
+                                continue
+                        else:
+                            if args.startyear: 
+                                if year == startyear and doy < args.startdoy:
+                                    continue
+                            if args.endyear:
+                                if year == endyear and doy > args.enddoy:
+                                    continue
+                            if doy > args.enddoy and doy < args.startdoy:
+                                continue
+                    
+                    if (acqDate >= args.startdate) and (acqDate <= args.enddate):
+        #               
+                        print('Scene {}, cloud cover of {} percent, added to list.'.format(sceneID, cc))
+                        if sceneID[2:3] == '4' or sceneID[2:3] == '5':
+                            i = '4-5'
+                        else:
+                            i = sceneID[2:3]
+                        if not sceneID in procdict[i]['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
+                            procdict[i]['scenelist'].append(sceneID)
+                            if args.allinpath:
+                                sc = scenesearch(scenedata, sceneID, pathrowdict)
+                                if len(sc) > 0:
+                                    for s in sc:
+                                        if not s in procdict[i]['scenelist']:
+                                            print('Also adding scene {} to the processing list.'.format(sceneID))
+                                            procdict[i]['scenelist'].append(s)
+                        # elif sceneID[2:3] == '7' and not sceneID in procdict['7']['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
+                        #     procdict['7']['scenelist']
+                        # elif (sceneID[2:3] == '4' or sceneID[2:3] == '5') and not sceneID in procdict['4-5']['scenelist']: #not sceneID[9:16] in L7exclude and (scenesensor == 'LANDSAT_TM' or scenesensor == 'LANDSAT_ETM' or 'LANDSAT_ETM_SLC_OFF') and 
+                        #     procdict['4-5']['scenelist']
+                        # # if not sceneID[9:16] in l47.keys():
+                        # #         l47[sceneID[9:16]] = [sceneID]
+                        # #     elif not sceneID in l47[sceneID[9:16]]:
+                        # #         l47[sceneID[9:16]].append(sceneID)
+                        #     if args.allinpath:
+                        #         sc = scenesearch(scenedata, sceneID, pathrowdict)
+                        #         if len(sc) > 0:
+                        #             for s in sc:
+                        #                 if not s in l47[sceneID[9:16]]:
+                        #                     print('Also adding scene {} to the processing list.'.format(sceneID))
+                        #                     l47[sceneID[9:16]].append(s)
+                            
+                #        elif scenesensor=='LANDSAT_ETM':
+                #            l7.append(sceneID)
+                #        elif scenesensor=='LANDSAT_ETM_SLC_OFF' and not sceneID[9:16] in L7exclude:
+                #            l7slcoff.append(sceneID)
+                        # elif sceneID[2:3] == '8' and not sceneID[9:16] in L8exclude:
+                        #     if not sceneID[9:16] in l8.keys():
+                        #         l8[sceneID[9:16]] = [sceneID]
+                        #     elif not sceneID in l8[sceneID[9:16]]:
+                        #         l8[sceneID[9:16]].append(sceneID)
+                        #     if args.allinpath:
+                        #         sc = scenesearch(scenedata, sceneID, pathrowdict)
+                        #         if len(sc) > 0:
+                        #             for s in sc:
+                        #                 if not s in l8[sceneID[9:16]]:
+                        #                     print('Also adding scene {} to the processing list.'.format(sceneID))
+                        #                     l8[sceneID[9:16]].append(s)
+            except Exception as e:
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(exc_type, fname, exc_tb.tb_lineno)
+                print('ERROR: {} {} {} {}.'.format(sceneID, exc_type, fname, exc_tb.tb_lineno))
+                ieo.logerror(sceneID, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
             
     return procdict, cctype
 
@@ -386,7 +422,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outdir', type = str, default = os.path.join(ieo.catdir, 'Landsat', 'ESPA_processing_lists'), help = 'Output directory')
     parser.add_argument('--ignorelocal', type = bool, default = False, help = 'Ignore presence of local scenes.')
     parser.add_argument('--srdir', type = str, default = ieo.srdir, help = 'Local SR scene directory')
-    parser.add_argument('--usesrdir', type = bool, default = True, help = 'Use local index of scenes rather than shapefile stored data')
+    parser.add_argument('--usesrdir', type = bool, default = False, help = 'Use local index of scenes rather than shapefile stored data')
     parser.add_argument('--allinpath', type = bool, default = True, help = 'Include missing scenes in path, even if they are too cloudy.')
     # parser.add_argument('--minsunel', type = float, default = 15.0, help = 'Sun elevation beneath which scenes will be ignored.')
     parser.add_argument('--separate', type = bool, default = False, help = 'Separate output files for Landsats 4-7 and 8.')
@@ -397,8 +433,10 @@ if __name__ == '__main__':
     parser.add_argument('--serviceURL', type = str, default = 'https://m2m.cr.usgs.gov/api/api/json/stable/', help = 'URL to download Landsat scenes')
     # parser.add_argument('-f', '--filetype', required = False, choices=['bundle', 'band'], help='File types to download, "bundle" for bundle files and "band" for band files')
     parser.add_argument('--idfield', required = False, default = 'displayId', type = str, choices = ['displayId', 'entityId'], help='Field to use for Landsat scene ID.')
+    parser.add_argument('--verbose', action = 'store_true', help = 'Display more messages during execution.')
     args = parser.parse_args()
     
+    print('Use S3: {}'.format(ieo.useS3))
     print("\nRunning Scripts...\n")
     startTime = datetime.datetime.now()
     
@@ -456,7 +494,21 @@ if __name__ == '__main__':
             print('Error: if used, both --startdoy and --enddoy must be defined. Exiting.')
             exit()
         
-    if args.usesrdir:
+    if ieo.useS3:
+        print('Seaching S3 bucket "{}" for ingested scenes.'.format(ieo.archivebucket))
+        bucketdict = ieo.getbucketobjects(ieo.archivebucket)
+        for key in bucketdict.keys():
+            if len(bucketdict[key]) > 0:
+                for item in bucketdict[key]:
+                    if '/' in item:
+                        i = item.rfind('/') + 1
+                    else:
+                        i = 0
+                    j = item.find('.tar')
+                    print('Found ingested scene: {}'.format(item[i:j]))
+                    localscenelist.append(item[i:j])
+        print('Found {} ingested scenes.'.format(len(localscenelist)))
+    elif args.usesrdir:
         dirs = [args.srdir, os.path.join(args.srdir,'L1G')]
         for d in dirs:
             flist = glob.glob(os.path.join(d,'L*.hdr'))
@@ -467,6 +519,7 @@ if __name__ == '__main__':
                         sceneid = os.path.basename(r)[:21]
                         if not sceneid in localscenelist:
                             localscenelist.append(os.path.basename(f)[:16])
+        
                         
     # the next set of lines will be deprecated as we are now using Level-2 Landsat data
     proclevels = ['L1TP']
@@ -547,7 +600,7 @@ if __name__ == '__main__':
                 "datasetName": datasetName
                 }
       
-            print(payload)
+            # print(payload)
             
             print("Adding scenes to list...\n")
             count = sendRequest(serviceUrl + "scene-list-add", payload, apiKey)    

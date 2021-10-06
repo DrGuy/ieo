@@ -78,6 +78,8 @@ useS3 = False
 if useS3 == 'Yes':
     tempprocdir = config['DEFAULT']['tempprocdir']
     useS3 = True
+    archivebucket = config['S3']['archivebucket']
+    landsatbucket = config['S3']['landsatdata']
     from S3ObjectStorage import *
 else:
     tempprocdir = None
@@ -662,6 +664,7 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     pixelqatile = kwargs.get('pixelqadata', None)
     SceneID = kwargs.get('SceneID', None)
     rewriteheader = kwargs.get('rewriteheader', True)
+    bucket = kwargs.get('bucket', 'landsat')
     acqtime = kwargs.get('acqtime', None)
     noupdate = kwargs.get('noupdate', False) # This will prevent the function from updating the tile with new data
     overwrite = kwargs.get('overwrite', False) # This will delete any existing tile data
@@ -669,6 +672,12 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     tilegeom = tile.GetGeometryRef()
     outfile = os.path.join(outdir, '{}_{}.dat'.format(outbasename, tilename))
     parentrasters =[inrastername]
+    if useS3:
+        parts = outbasename.split('_')
+        prefix = '{}/{}/{}'.format(os.path.basename(outdir), parts[2], parts[1][:4])
+        for ext in ['dat', 'hdr']:
+            s3_object = '{}/{}.{}'.format(prefix, outbasename, ext)
+            downloadfile(outdir, bucket, s3_object)
     if rastertype == 'ref': #, 'Landsat TIR', 'Landsat Band6']:
         print('SceneID = {}'.format(SceneID))
         if SceneID[2:3] == '8': # and not (rastertype in ['Landsat TIR', 'Landsat Band6']):
@@ -994,11 +1003,14 @@ def gettileqamask(f, tamask, sceneid, *args, **kwargs):
 def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     # This function creates NDVI and EVI files.
     useqamask = kwargs.get('useqamask', True)
+    sceneid =kwargs.get('sceneid', None)
     # usefmask = kwargs.get('usefmask', False)
     # usecfmask = kwargs.get('usecfmask', False)
     dirname, basename = os.path.split(refitm)
-    i = basename.find('_ref_')
-    sceneid = basename[:i] # This will now use either the SceneID or ProductID
+    
+    if not sceneid:
+        # i = basename.find('.')
+        sceneid = os.path.basename(refitm) # This will now use either the SceneID or ProductID
     acqtime = envihdracqtime(refitm.replace('.dat', '.hdr'))
     qafile = kwargs.get('qafile', os.path.join(pixelqadir,'{}_QA_PIXEL.dat'.format(sceneid)))
     outdir = kwargs.get('outdir', dirname)
@@ -1167,6 +1179,8 @@ def importespatotiles(f, *args, **kwargs):
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
     useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 2 Product ID rather than old Scene ID
+    S3tarfilepath = kwargs.get('S3tarfilepath', 'landsat') # This is for archiving input files after ingestion only.
+    S3tarfilepath = kwargs.get('S3tarfilebucket', 'ingested') # This is for archiving input files after ingestion only.
     btimg = None
     masktype = None
     basename = os.path.basename(f)
@@ -1451,10 +1465,17 @@ def importespatotiles(f, *args, **kwargs):
 
     # Clean up files.
 
-    if basename.endswith('.tar.gz') or basename.endswith('.tar'):
-        print('Moving {} to archive: {}'.format(basename, archdir))
-        if not os.access(os.path.join(archdir, os.path.basename(f)), os.F_OK):
-            shutil.move(f, archdir)
+    if basename.endswith('.tar.gz') or basename.endswith('.tar'): # Move input tarfile to archive location 
+        if useS3: # Archive to S3 object storage
+            year = sceneid[9:13]
+            targetdir = '{}/{}/{}'.format(S3tarfilebucket, S3tarfilebucket, year)
+            print('Moving {} to S3 object storage bucket: {}'.format(basename, targetdir))
+            copyfilestobucket(filename = f, bucket= S3tarfilebucket, targetdir = targetdir)
+            os.remove(f)
+        else: # archive to archdir
+            print('Moving {} to archive: {}'.format(basename, archdir))
+            if not os.access(os.path.join(archdir, os.path.basename(f)), os.F_OK):
+                shutil.move(f, archdir)
     if remove:
         print('Cleaning up files in directory.')
         shutil.rmtree(outputdir)
@@ -1541,6 +1562,10 @@ def untarfile(file, outdir):
         # tar.close()
         os.remove(file) # delete bad tar.gz
         return 0
+
+## Boto3 functions
+
+
 
 # def importespa(f, *args, **kwargs):
 #     # This function imports new ESPA-process LEDAPS data

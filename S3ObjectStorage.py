@@ -173,11 +173,11 @@ def readcredentials():
                         credentials[headers[i]] = line[i]
     return credentials
 
-def s3resource(*args, **kwargs):
+def s3resource():
     s3res = boto3.resource('s3', endpoint_url = args.url)
     return s3res
 
-def s3client(*args, **kwargs):
+def s3client():
     s3cli = boto3.client('s3', endpoint_url = args.url)
     return s3cli
 
@@ -288,11 +288,15 @@ def copyfilestobucket(*args, **kwargs):
     print('Upload complete. {}/{} files uploaded, with {} errors.'. format(len(flist) - numerrors, len(flist), numerrors))
             
             
-def downloadfile(outdir, bucket, s3_object):
+def downloadfile(outdir, bucket, s3_object, *args, **kwargs):
+    usefull = kwargs.get('usefull', False) # if set to "True", will replicate S3 path structure in outdir, otherwise will only copy the file sans any preceding path.
     print('Downloading file {} from bucket {} to: {}'.format(s3_object, bucket, outdir))
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-    outfile = os.path.join(outdir, s3_object)
+    if usefull:
+        outfile = os.path.join(outdir, s3_object)
+    else:
+        outfile = os.path.join(outdir, os.path.basename(s3_object))
     s3cli.download_file(bucket, s3_object, outfile)
     
 def getbucketobjects(bucket):
@@ -304,12 +308,14 @@ def getbucketobjects(bucket):
         s3_object = s3_key['Key']
         if not s3_object.endswith('/'):
             outdname, outfname = os.path.split(s3_object)
+            if not outdname:
+                outdname = 'root'
             if not outdname in outdict.keys():
                 outdict[outdname] = []
-            outdict[outdname].append(outfname)
-            
+            if outfname:
+                outdict[outdname].append(outfname)
         else:
-            outdict[outdname] = []
+            outdict[s3_object] = []
     return outdict
 
 def downloadscene(scenedict, sceneid, downloaddir):
@@ -336,8 +342,8 @@ def downloadscene(scenedict, sceneid, downloaddir):
                 os.makedirs(s3_object)
     print('Scene {} has been downloaded.'.format(sceneid))
 
-s3cli = s3client(args.url)
-s3res = s3resource(args.url)         
+s3cli = s3client()
+s3res = s3resource()         
 
 # def openS3(credentials, url):
 #     # bucketurl = '{}/{}'.format(url, bucket)

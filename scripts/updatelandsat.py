@@ -973,8 +973,8 @@ def readUSGS(baseURL, version, headers, \
                 enddatetuple = l5enddatetuple
         
         # Null date range?
-        if datetuple >= enddatetuple:
-            print('0 new scenes have been found or require updating, querying metadata.')
+        # if datetuple >= enddatetuple:
+        #     print('0 new scenes have been found or require updating.')
         
         # =============================================================================
         # Loop through the specified collections in the specified date range
@@ -990,11 +990,11 @@ def readUSGS(baseURL, version, headers, \
                 edatetuple = enddatetuple
             
             coll_startdate = datetuple.strftime('%Y-%m-%d')
-            enddate = edatetuple.strftime('%Y-%m-%d')
+            coll_enddate = edatetuple.strftime('%Y-%m-%d')
             
             # Construct the USGS/ERS search query, and limit its scope based on the
             #    region of interest's MBR and the current chunk's date range
-            print('\rNow searching for scene data from collection {} from {} through {}.'.format(datasetName, coll_startdate, enddate))
+            print('\rNow searching for scene data from collection {} from {} through {}.'.format(datasetName, coll_startdate, coll_enddate))
             searchparams = json.dumps({"datasetName": datasetName,
                             "sceneFilter" : {                                          
                                 "spatialFilter":{"filterType": "mbr",
@@ -1002,8 +1002,8 @@ def readUSGS(baseURL, version, headers, \
                                                               "longitude": MBR[1]},
                                                  "upperRight":{"latitude": MBR[2],
                                                                "longitude": MBR[3]}},
-                                "ingestFilter":{"start": coll_startdate,
-                                                  "end": enddate},
+                                "temporalFilter":{"start": coll_startdate,
+                                                  "end": coll_enddate},
                                 "cloudCoverFilter" : {
                                     "includeUnknown":False,
                                     "max": 100,
@@ -1028,7 +1028,7 @@ def readUSGS(baseURL, version, headers, \
                 querydir = os.path.join(ieo.logdir, 'json_query_data')
                 if not os.path.isdir(querydir):
                     os.mkdir(querydir)
-                outfile = os.path.join(querydir, 'query_{}_{}_{}_{}.txt'.format(datasetName, startdate, enddate, now.strftime('%Y%m%d-%H%M%S')))
+                outfile = os.path.join(querydir, 'query_{}_{}_{}_{}.txt'.format(datasetName, coll_startdate, coll_enddate, now.strftime('%Y%m%d-%H%M%S')))
                 with open(outfile, 'w') as output:
                     output.write(response.text)
             
@@ -1517,7 +1517,7 @@ if __name__ == '__main__':
     parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
     parser.add_argument('--thumbnails',  action = 'store_true', help = 'Download thumbnails (default = False).')
     parser.add_argument('--savequeries', action = 'store_true', help = 'Save queries.')
-    parser.add_argument('--verbose', action = 'store_true', help = 'Display more messages during migration..')
+    parser.add_argument('--verbose', action = 'store_true', help = 'Display more messages during migration.')
     
     args = parser.parse_args()
  
