@@ -17,8 +17,8 @@
 # the appropriate submodules, with this one being used solely to interface 
 # with S3 object storage
 
-import os, argparse, sys, glob, boto3, datetime
-from subprocess import Popen
+import os, sys, boto3, datetime # , argparse, glob
+# from subprocess import Popen
 from pkg_resources import resource_stream, resource_string, resource_filename, Requirement
 # from pkg_resources import resource_stream, resource_string, resource_filename, Requirement
 
@@ -43,29 +43,31 @@ configfile = 'config/ieo.ini'
 config_location = resource_filename(Requirement.parse('ieo'), configfile)
 config.read(config_location)
 
-parser = argparse.ArgumentParser(description = 'IEO Object Storage interface submodule.')
-# parser.add_argument('--indir', type = str, default = None, help = 'Optional input directory in which to search for files. This is ignored if --batch=True.')
-# parser.add_argument('--outdir', type = str, default = None, help = 'Optional output directory in which to save products.')
-# parser.add_argument('--baseoutdir', type = str, default = config['DEFAULT']['BASEOUTPUTDIR'], help = 'Base output directory in which to save products.')
-# parser.add_argument('-o', '--outfile', type = str, default = None, help = 'Output product filename. If --infile is not set, then this flag will be ignored.')
-# parser.add_argument('-i', '--infile', type = str, default = None, help = 'Input file name.')
-# parser.add_argument('-g', '--graph', type = str, default = r'C:\Users\Guy\.snap\graphs\User Graphs\MCI_Resample_S2_20m.xml', help = 'ESA SNAP XML graph file path.')
-# parser.add_argument('-e', '--op', type = str, default = None, help = 'ESA SNAP operator.')
-# parser.add_argument('-p', '--properties', type = str, default = r'D:\Imagery\Scripts\Mci.S2.properties', help = 'ESA SNAP GPT command properties text file path.')
-# parser.add_argument('-d', '--dimap', type = bool, default = 'store_true', help = 'Input files are BEAM DIMAP.')
-# parser.add_argument('--gpt', type = str, default = r'C:\Program Files\snap\bin\gpt', help = 'ESA SNAP XML graph file path.')
-# parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite any existing files.')
-# parser.add_argument('--mgrs', type = str, default = '30TUK', help = 'Sentinel-2 MGRS Tile name.')
-# parser.add_argument('--batch', type = bool, default = True, help = 'Process all available scenes for a given satellite/ sensor combination.')
-# parser.add_argument('--sentinel', type = str, default = '2', help = 'Sentinel satellite number (default = 2).')
-# parser.add_argument('--product', type = str, default = 'l2a', help = 'Sentinel product type (default = l2a, will be different for different sensors).')
-# parser.add_argument('--bucket', type = str, default = None, help = 'Only process data from a specific bucket.')
-parser.add_argument('--url', type = str, default = config['S3']['endpoint_url'], help = 'Alternative S3 bucket URL. If used, you must also present a different --credentials file from the default.')
-parser.add_argument('--credentials', type = str, default = config['S3']['credentials'], help = 'Full path of S3 credentials CSV file to use.')
-# parser.add_argument('--warp', type = str, default = None, help = 'Warp products to specific projection EPSG code. Example: for Irish Transverse Mercator (EPSG:2157), use "2157". Not implemented yet.')
+# parser = argparse.ArgumentParser(description = 'IEO Object Storage interface submodule.')
+# # parser.add_argument('--indir', type = str, default = None, help = 'Optional input directory in which to search for files. This is ignored if --batch=True.')
+# # parser.add_argument('--outdir', type = str, default = None, help = 'Optional output directory in which to save products.')
+# # parser.add_argument('--baseoutdir', type = str, default = config['DEFAULT']['BASEOUTPUTDIR'], help = 'Base output directory in which to save products.')
+# # parser.add_argument('-o', '--outfile', type = str, default = None, help = 'Output product filename. If --infile is not set, then this flag will be ignored.')
+# # parser.add_argument('-i', '--infile', type = str, default = None, help = 'Input file name.')
+# # parser.add_argument('-g', '--graph', type = str, default = r'C:\Users\Guy\.snap\graphs\User Graphs\MCI_Resample_S2_20m.xml', help = 'ESA SNAP XML graph file path.')
+# # parser.add_argument('-e', '--op', type = str, default = None, help = 'ESA SNAP operator.')
+# # parser.add_argument('-p', '--properties', type = str, default = r'D:\Imagery\Scripts\Mci.S2.properties', help = 'ESA SNAP GPT command properties text file path.')
+# # parser.add_argument('-d', '--dimap', type = bool, default = 'store_true', help = 'Input files are BEAM DIMAP.')
+# # parser.add_argument('--gpt', type = str, default = r'C:\Program Files\snap\bin\gpt', help = 'ESA SNAP XML graph file path.')
+# # parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite any existing files.')
+# # parser.add_argument('--mgrs', type = str, default = '30TUK', help = 'Sentinel-2 MGRS Tile name.')
+# # parser.add_argument('--batch', type = bool, default = True, help = 'Process all available scenes for a given satellite/ sensor combination.')
+# # parser.add_argument('--sentinel', type = str, default = '2', help = 'Sentinel satellite number (default = 2).')
+# # parser.add_argument('--product', type = str, default = 'l2a', help = 'Sentinel product type (default = l2a, will be different for different sensors).')
+# # parser.add_argument('--bucket', type = str, default = None, help = 'Only process data from a specific bucket.')
+# parser.add_argument('--url', type = str, default = config['S3']['endpoint_url'], help = 'Alternative S3 bucket URL. If used, you must also present a different --credentials file from the default.')
+# parser.add_argument('--credentials', type = str, default = config['S3']['credentials'], help = 'Full path of S3 credentials CSV file to use.')
+# # parser.add_argument('--warp', type = str, default = None, help = 'Warp products to specific projection EPSG code. Example: for Irish Transverse Mercator (EPSG:2157), use "2157". Not implemented yet.')
 
-args = parser.parse_args()
+# args = parser.parse_args()
 
+url = config['S3']['endpoint_url']
+credentials = config['S3']['credentials']
 # S2tiles = config['DEFAULT']['S2tiless2'].split(',')
 
 # suffixdict = {
@@ -73,32 +75,58 @@ args = parser.parse_args()
 #     'S2Resampling' : 's2resampled',
 #     }
 
-# sensordict = {
-#     '1' : {
-#         'default' : 'GRD',
-#         'accept' : ['SLC', 'GRD', 'RAW', 'OCN'],
-#         'startyear' : 2014,
-#         'qyear' : 2018,
-#         },
-#     '2' : {
-#         'default' : 'L2A',
-#         'accept' : ['L1C', 'L2A'],
-#         'startyear' : 2015,
-#         'qyear' : 2018,
-#         },
-#     '3' : {
-#         'default' : 'OLCI',
-#         'accept' : ['OLCI', 'SRAL'],
-#         'startyear' : 2018,
-#         'qyear' : None,
-#         },
-#     '5P' : {
-#         'default' : 'L2',
-#         'accept' : ['L2'],
-#         'startyear' : 2018,
-#         'qyear' : None,
-#         },
-#     }
+sensordict = {
+    '1' : {
+        'default' : 'GRD',
+        'accept' : ['SLC', 'GRD', 'RAW', 'OCN'],
+        'startyear' : 2014,
+        'qyear' : 2018,
+        },
+    '2' : {
+        'default' : 'L2A',
+        'accept' : ['L1C', 'L2A'],
+        'startyear' : 2015,
+        'qyear' : 2018,
+        },
+    '3' : {
+        'default' : 'OLCI',
+        'accept' : ['OLCI', 'SRAL'],
+        'startyear' : 2018,
+        'qyear' : None,
+        },
+    '5P' : {
+        'default' : 'L2',
+        'accept' : ['L2'],
+        'startyear' : 2018,
+        'qyear' : None,
+        },
+    }
+
+def getMundibucketList(sentinel, *args, **kwargs):
+    verbose = kwargs.get('verbose', False)
+    sentinel = str(sentinel)
+    sentinelbuckets = []
+    sensor = kwargs.get('sensor', None)
+    if not sensor in sensordict[sentinel]['accept']:
+        sensor = sensordict[sentinel]['default']
+    now = datetime.datetime.now()
+    for year in range(sensordict[sentinel]['startyear'], now.year + 1):
+        if year < sensordict[sentinel]['qyear']:
+            sentinelbuckets.append('s{}-{}-{}'.format(sentinel, sensor, year).lower())
+        elif year < now.year and year >= sensordict[sentinel]['qyear']:
+            for q in range(0, 4):
+                sentinelbuckets.append('s{}-{}-{}-q{}'.format(sentinel, sensor, year, q + 1).lower())
+        else:
+            for q in range (0, (now.month - 1) // 3 + 1):
+                sentinelbuckets.append('s{}-{}-{}-q{}'.format(sentinel, sensor, year, q + 1).lower())
+    if verbose:
+        for bucket in sentinelbuckets:
+            print(bucket)
+    return sentinelbuckets
+# if len(buckets) == 0:
+#     print('ERROR: No buckets or data were found to process. Exiting')
+#     sys.exit()
+
 
 # if not args.sentinel.upper() in sensordict.keys():
 #     print('ERROR: --sentinel value is not supported at this time, or is misspelt.')
@@ -138,31 +166,118 @@ args = parser.parse_args()
 #         for f in flist:
 #             ignorelist.append(os.path.basename(f)[:60])
 
-# buckets = []
-# if args.bucket:
-#     buckets = [args.bucket.lower()]
-# elif args.batch:
-#     if not sensordict[args.sentinel]['qyear']:
-#         buckets.append('s{}-{}'.format(args.sentinel, args.sensor).lower())
-#     else:
-#         now = datetime.datetime.now()
-#         for year in range(sensordict[args.sentinel]['startyear'], now.year + 1):
-#             if year < sensordict[args.sentinel]['qyear']:
-#                 buckets.append('s{}-{}-{}'.format(args.sentinel, args.sensor, year).lower())
-#             elif year < now.year:
-#                 for q in range(0, 4):
-#                     buckets.append('s{}-{}-{}-q{}'.format(args.sentinel, args.sensor, year, q + 1).lower())
-#             else:
-#                 for q in range (0, (now.month - 1) // 3 + 1):
-#                     buckets.append('s{}-{}-{}-q{}'.format(args.sentinel, args.sensor, year, q + 1).lower())
-            
-# if len(buckets) == 0:
-#     print('ERROR: No buckets or data were found to process. Exiting')
-#     sys.exit()
+
+def getSentinel2scenedict(tilelist, *args, **kwargs):
+    # verbose = kwargs.get('verbose', False)
+    scenedict = kwargs.get('scenedict', {})
+    datetuple = kwargs.get('startdate', datetime.datetime.strptime('2015-06-23', '%Y-%m-%d'))
+    enddate = kwargs.get('enddate', datetime.datetime.now())
+    # buckets = kwargs.get('bucket', getMundibucketList('2', verbose = verbose))
+    if not scenedict:
+        scenedict = {}
+    print('Searching for scenes between {} and {}.'.format(datetuple.strftime('%Y-%m-%d'), enddate.strftime('%Y-%m-%d'))) 
+    while datetuple <= enddate:
+        # months = []
+        # days = []
+        q = (datetuple.month - 1) // 3 + 1
+        # lastmonth = datetuple.month
+        
+        if datetuple.year >= sensordict['2']['qyear']:
+            bucket = f's2-l2a-{datetuple.year}-q{q}'
+        else:
+            bucket = f's2-l2a-{datetuple.year}'
+        if not 'q' in bucket:
+            q = 4
+        
+        for tile in tilelist:
+            print(f'Now searching bucket {bucket} for scenes of tile {tile}.')
+            prefix = '{}/{}/{}/{}/'.format(tile[:2], tile[2:3], tile[3:], datetuple.year)
+            result = s3cli.list_objects(Bucket = bucket, Prefix = prefix, Delimiter = '/')
+            if isinstance(result.get('CommonPrefixes'), list):
+                for o in result.get('CommonPrefixes'):
+                    p = o.get('Prefix').split('/')
+                    # if int(p[4]) >= datetuple.month and int(p[4]) <= enddate.month:
+                    
+                    print('Searching in month: {}.'.format(p[4]))
+                    mprefix = o.get('Prefix')
+                    mresult = s3cli.list_objects(Bucket = bucket, Prefix = mprefix, Delimiter = '/')
+                    for o1 in mresult.get('CommonPrefixes'):
+                        p1 = o1.get('Prefix').split('/')
+                        print('Searching in day: {}.'.format(p1[5]))
+                        datetuple = datetime.datetime.strptime('{}-{}-{}'.format(p1[3], p1[4], p1[5]), '%Y-%m-%d')
+                        # if int(p1[5]) >= datetuple.day and int(p1[5]) <= enddate.day:
+                        nprefix = o1.get('Prefix')
+                        nresult = s3cli.list_objects(Bucket = bucket, Prefix = nprefix, Delimiter = '/')
+                        o2file = nresult.get('CommonPrefixes')[0]['Prefix']
+                        parts = o2file.split('/')
+                        ProductID = parts[6]
+                        pparts = ProductID.split('_')
+                        prodtime = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
+                        year, month, day = pparts[3], pparts[4], pparts[5]
+                        if len(nresult.get('CommonPrefixes')) > 1:
+                            i = 1
+                            while i <= len(nresult.get('CommonPrefixes')): 
+                                o2file2 = nresult.get('CommonPrefixes')[i - 1]['Prefix']
+                                parts = o2file2.split('/')
+                                ProductID2 = parts[6]
+                                pparts = ProductID2.split('_')
+                                prodtime2 = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
+                                if prodtime2 > prodtime:
+                                    ProductID = ProductID2
+                                    o2file = o2file2
+                                i += 1
+                        if not bucket in scenedict.keys():
+                            scenedict[bucket] = {}
+                        if not year in scenedict[bucket].keys():
+                            scenedict[bucket][year] = {}
+                        if not month in scenedict[bucket][year].keys():
+                            scenedict[bucket][year][month] = {}
+                        if not day in scenedict[bucket][year][month].keys():
+                            scenedict[bucket][year][month][day] = []
+                        print(f'Adding scene to processing list: {ProductID}')
+                        scenedict[bucket][year][month][day].append(o2file)
+        if q == 4:
+            year = datetuple.year + 1
+            month = 1
+        else:
+            month = q * 3 + 1
+            year = datetuple.year
+        day = 1
+        datetuple = datetime.datetime.strptime(f'{year}-{month}-{day}', '%Y-%m-%d')
+      
+    return scenedict
+                
+        
+    # for bucket in buckets:
+    #     print(f'Now searching bucket {bucket} for scenes from MGRS tile {tile}.')
+    #     scenedict[bucket] = {}
+    #     if not 'q' in bucket:
+    #         year = bucket[-4:]
+    #         month = 1
+    #         endmonth = 12
+    #     else:
+    #         year = bucket[-7 : -3]
+    #         q = str(bucket[-1:])
+    #         endmonth = q * 3
+    #         month = endmonth - 2
+    #     while month <= endmonth:
+    #         print(f'Searching in month: {month}')
+    #         day = 1
+    #         while day <= 31:
+    #             prefix = '{}/{}/{}/{}/{:02d}/{:02d}'.format(tile[:2], tile[2 : 3], tile[3:], year, month, day)
+    #             d = getbucketobjects(bucket, prefix)
+    #             if isinstance(d, dict):
+    #                 if len(d[prefix]) > 0:
+    #                     for item in d[prefix]:
+    #                         print(f'Adding scene {item} from date {year}/{month:02d}/{day:02d}.')
+    #                         scenedict[bucket].append(f'{prefix}/{item}')
+    #             day += 1
+    #         month += 1
+    # return scenedict
 
 def readcredentials():
     credentials = {}
-    with open(args.credentials, 'r') as lines:
+    with open(credentials, 'r') as lines:
         for line in lines:
             line = line.rstrip().split(',')
             if line[0] == 'User Name':
@@ -174,11 +289,11 @@ def readcredentials():
     return credentials
 
 def s3resource():
-    s3res = boto3.resource('s3', endpoint_url = args.url)
+    s3res = boto3.resource('s3', endpoint_url = url)
     return s3res
 
 def s3client():
-    s3cli = boto3.client('s3', endpoint_url = args.url)
+    s3cli = boto3.client('s3', endpoint_url = url)
     return s3cli
 
 # def getlocalbuckets(s3res, *args, **kwargs):
@@ -218,6 +333,26 @@ def s3client():
 #                     scenedict[tile].append(scene : sdict)
 #     return scenedict 
             
+
+def download_s3_folder(bucket_name, s3_folder, local_dir):
+    """
+    Download the contents of a folder directory
+    Args:
+        bucket_name: the name of the s3 bucket
+        s3_folder: the folder path in the s3 bucket
+        local_dir: a relative or absolute directory path in the local file system
+        shamelessly borrowed from: https://stackoverflow.com/questions/49772151/download-a-folder-from-s3-using-boto3
+    """
+    bucket = s3res.Bucket(bucket_name)
+    for obj in bucket.objects.filter(Prefix = s3_folder):
+        target = obj.key if local_dir is None \
+            else os.path.join(local_dir, os.path.relpath(obj.key, s3_folder))
+        if not os.path.exists(os.path.dirname(target)):
+            os.makedirs(os.path.dirname(target))
+        if obj.key[-1] == '/':
+            continue
+        bucket.download_file(obj.key, target)
+
 def copyfilestobucket(*args, **kwargs):
     # This function will copy local files to a specified S3 bucket
     bucket = kwargs.get('bucket', None) # name of S3 bucket to save files.
@@ -227,7 +362,7 @@ def copyfilestobucket(*args, **kwargs):
     inbasedir = kwargs.get('inbasedir', None) # start of local directory path to be stripped from full file path. Only used if "copydir" is is not used.
     targetdir = kwargs.get('targetdir', None) # name of directory in which to copy file or files. If empty, will be taken from the directory of the first file in the list if "copydir" is used, or be determined by processing time
     flist = []
-    dirlist = []
+    # dirlist = []
     i = 0
     if copydir:
         i = len(copydir)
@@ -275,7 +410,7 @@ def copyfilestobucket(*args, **kwargs):
             print('ERROR: "inbasedir" {} is not a folder on the local machine. Files will be saved to the base target directory {}.'.format(inbasedir, targetdir))
     numerrors = 0
     for f in flist:
-        print('Now copying {} to bucket {}. ({}/{})'.format(f, bucket, flist.index(f + 1), len(flist)))
+        print('Now copying {} to bucket {}. ({}/{})'.format(f, bucket, flist.index(f) + 1, len(flist)))
         if not os.path.isfile(f):
             print('ERROR: {} does not exist on disk, skipping.'. format(f))
             numerrors += 1
@@ -298,25 +433,41 @@ def downloadfile(outdir, bucket, s3_object, *args, **kwargs):
     else:
         outfile = os.path.join(outdir, os.path.basename(s3_object))
     s3cli.download_file(bucket, s3_object, outfile)
-    
-def getbucketobjects(bucket):
+
+def getFileList(bucket, *args, **kwargs):
+    prefix = kwargs.get('prefix', None)
+    b = s3res.Bucket(bucket)
+    filelist = []
+    if prefix:
+        objs = b.objects.filter(Prefix = prefix)
+    else:
+        objs = b.objects.all()
+    if len(list(objs)) > 0:
+        for obj in objs:
+            filelist.append(obj.key)
+    return filelist
+
+def getbucketobjects(bucket, prefix):
     # code borrowed from 
     print('Retrieving objects for S3 bucket: {}'.format(bucket))
     outdict = {}
-    contents = s3cli.list_objects_v2(Bucket = bucket)['Contents']
-    for s3_key in contents:
-        s3_object = s3_key['Key']
-        if not s3_object.endswith('/'):
-            outdname, outfname = os.path.split(s3_object)
-            if not outdname:
-                outdname = 'root'
-            if not outdname in outdict.keys():
-                outdict[outdname] = []
-            if outfname:
-                outdict[outdname].append(outfname)
-        else:
-            outdict[s3_object] = []
-    return outdict
+    try:
+        contents = s3cli.list_objects_v2(Bucket = bucket, Prefix = prefix)['Contents']
+        for s3_key in contents:
+            s3_object = s3_key['Key']
+            if not s3_object.endswith('/'):
+                outdname, outfname = os.path.split(s3_object)
+                if outdname:
+                    if not outdname in outdict.keys():
+                        outdict[outdname] = []
+                    outdict[outdname].append(outfname)
+                
+            else:
+                outdict[s3_object[:-1]] = []
+        return outdict
+    except:
+        print('Error: unable to get directory listing.')
+        return None
 
 def downloadscene(scenedict, sceneid, downloaddir):
     # code borrowed from 

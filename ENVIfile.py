@@ -183,13 +183,14 @@ headerdict['Landsat MSS'].update({
 headerdict['Sentinel-2'] = headerdict['default'].copy()
 headerdict['Sentinel-2'].update({
     'description': 'Sentinel-2 Surface Reflectance (%s)',  # sceneid
-    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR broad', 'NIR narrow', 'NIR water vapor', 'Cirrus', 'SWIR 1', 'SWIR 2'], # sceneid
-    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.375, 1.61, 2.19],
+    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR broad', 'NIR narrow', 'NIR water vapor', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.61, 2.19], # , 1.375
     'wavelength units': 'Micrometers',
-    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0075, 0.0075, 0.01, 0.0575, 0.01, 0.01, 0.015, 0.045, 0.09],
-    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 6, 4, 1.5],
-    'default bands': [13, 8, 2],
-    'defaultbasefilename': '%s_ref.dat' # sceneid
+    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0075, 0.0075, 0.01, 0.0575, 0.01, 0.01, 0.045, 0.09], # , 0.015
+    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 6, 4, 1.5], # , 6
+    'default bands': [12, 8, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
     }) 
 
 headerdict['NDVI'] = headerdict['default'].copy()
@@ -197,6 +198,22 @@ headerdict['NDVI'].update({
     'description': 'NDVI (%s)',  # sceneid
     'band names': ['NDVI'], # sceneid
     'defaultbasefilename': '%s_NDVI.dat', # sceneid
+    'data ignore value': 0.0
+    }) 
+
+headerdict['NDTI'] = headerdict['default'].copy()
+headerdict['NDTI'].update({
+    'description': 'NDTI (%s)',  # sceneid
+    'band names': ['NDTI'], # sceneid
+    'defaultbasefilename': '%s_NDTI.dat', # sceneid
+    'data ignore value': 0.0
+    }) 
+
+headerdict['NBR'] = headerdict['default'].copy()
+headerdict['NBR'].update({
+    'description': 'NBR (%s)',  # sceneid
+    'band names': ['NBR'], # sceneid
+    'defaultbasefilename': '%s_NBR.dat', # sceneid
     'data ignore value': 0.0
     }) 
 
@@ -208,7 +225,27 @@ headerdict['EVI'].update({
     'data ignore value': 0.0
     }) 
     
-headerdict['Landsat'] = {'LE7': 'Landsat ETM+', 'LT4': 'Landsat TM', 'LT5': 'Landsat TM', 'LM1': 'Landsat MSS', 'LM2': 'Landsat MSS', 'LM3': 'Landsat MSS', 'LM4': 'Landsat MSS', 'LM5': 'Landsat MSS', 'LO8': 'Landsat OLI', 'LT8': 'Landsat TIR', 'LC8': {'ref': 'Landsat OLI', 'BT': 'Landsat TIR'}}
+headerdict['Landsat'] = {'LE7': 'Landsat ETM+', 
+                         'LT4': 'Landsat TM', 
+                         'LT5': 'Landsat TM', 
+                         'LM1': 'Landsat MSS', 
+                         'LM2': 'Landsat MSS', 
+                         'LM3': 'Landsat MSS', 
+                         'LM4': 'Landsat MSS', 
+                         'LM5': 'Landsat MSS', 
+                         'LO8': 'Landsat OLI', 
+                         'LT8': 'Landsat TIR', 
+                         'LC8': {
+                             'ref': 'Landsat OLI', 
+                             'BT': 'Landsat TIR'
+                             }, 
+                         'LO9': 'Landsat OLI', 
+                         'LT9': 'Landsat TIR', 
+                         'LC9': {
+                             'ref': 'Landsat OLI', 
+                             'BT': 'Landsat TIR'
+                             }
+                         }
 
 
     
@@ -308,6 +345,10 @@ class ENVIfile(object):
         
         # Determine proper raster and sensor types
         self.SceneID = kwargs.get('SceneID', None)
+        self.ProductID = kwargs.get('ProductID', None)
+        if not self.SceneID:
+            if self.ProductID:
+                self.SceneID = self.ProductID
         self.header.sensortype = kwargs.get('sensortype', None)
         self.header.sensortype = kwargs.get('sensor', None)
         if rastertype in ['ref', 'BT']:
@@ -316,6 +357,12 @@ class ENVIfile(object):
                 self.header.sensortype = self.rastertype
             elif self.SceneID[:3] == 'LC8':
                 self.rastertype = headerdict['Landsat']['LC8'][rastertype]
+                if rastertype == 'BT':
+                    self.header.sensortype = 'Landsat TIR'
+                else: 
+                    self.header.sensortype = 'Landsat OLI'
+            elif self.SceneID[:3] == 'LC9':
+                self.rastertype = headerdict['Landsat']['LC9'][rastertype]
                 if rastertype == 'BT':
                     self.header.sensortype = 'Landsat TIR'
                 else: 
@@ -335,7 +382,7 @@ class ENVIfile(object):
                 if self.SceneID[:1] == 'S':
                     self.header.sensortype = 'Sentinel-2'
                 elif self.SceneID[:1] == 'L':
-                    if self.SceneID[2:3] == '8':
+                    if self.SceneID[2:3] in ['8', '9']:
                         self.header.sensortype = 'Landsat OLI'
                     else:
                         self.header.sensortype = headerdict['Landsat'][self.SceneID[:3]] 
@@ -558,7 +605,18 @@ class ENVIfile(object):
             self.header.acquisitiontime = None
         if not self.header.parentrasters: 
             if 'parentrasters' in self.header.dict.keys():
-                self.header.parentrasters = self.header.dict['parentrasters']
+                if self.header.dict['parentrasters'].startswith('parent'):
+                    self.header.parentrasters = self.header.dict['parentrasters']
+                else:
+                    self.header.parentrasters = 'parent rasters = { '
+                    if isinstance(self.header.dict['parentrasters'], list):
+                        for item in self.header.dict['parentrasters']:
+                            if self.header.dict['parentrasters'].index(item) > 0:
+                                self.header.parentrasters += ', '
+                            self.header.parentrasters += item
+                        self.header.parentrasters += ' }\n'
+                    else:
+                        self.header.parentrasters += ('{}'.format(self.header.dict['parentrasters']) + ' }\n')
         
         return 
         
@@ -688,7 +746,19 @@ class ENVIfile(object):
                     self.header.headerstr += 'sensor type = %s\n'%self.header.sensortype
                 if self.header.acquisitiontime:
                     self.header.headerstr += self.header.acquisitiontime
-                if self.header.parentrasters:   
+                if self.header.parentrasters:
+                    if isinstance(self.header.parentrasters, list):
+                        if len(self.header.parentrasters) > 0:
+                            parentrasterstr = 'parent rasters = { '
+                            for item in self.header.parentrasters:
+                                if self.header.parentrasters.index(item) > 0:
+                                    parentrasterstr += ', '
+                                parentrasterstr += item
+                                parentrasterstr += ' }\n'
+                        else:
+                            parentrasterstr = ''
+                        self.header.parentrasters = parentrasterstr
+                        
                     self.header.headerstr += self.header.parentrasters
                 return 
                 
