@@ -12,7 +12,7 @@
 # 4. Calculates NDVI and EVI values.
 # 5. Saves tiles to S3 bucket
 
-import os, sys, glob, datetime, argparse#, ieo, shutil
+import os, sys, glob, datetime, argparse, pickle#, ieo, shutil
 from osgeo import ogr
 
 try: # This is included as the module may not properly install in Anaconda.
@@ -45,11 +45,20 @@ parser.add_argument('-e', '--evidir', type = str, default = ieo.Sen2evidir, help
 parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite existing files.')
 parser.add_argument('-d', '--delay', type = int, default = 0, help = 'Delay execution of script in seconds.')
 parser.add_argument('-r', '--remove', type = bool, default = True, help = 'Remove temporary files after ingest.')
-parser.add_argument('--MGRS', type = str, default = '29UPU', help = 'Comma-delimited list of MGRS tiles to process, without any spaces. Default = 29UPU for now.')#'If missing, all default tiles will be processed for the date range.')
+parser.add_argument('--removelocal', action = 'store_true', help = 'Remove local files after ingest.')
+parser.add_argument('--MGRS', type = str, default = None, help = 'Comma-delimited list of MGRS tiles to process, without any spaces. Default = 29UPU for now.')#'If missing, all default tiles will be processed for the date range.')
 parser.add_argument('--startdate', type = str, default = '2015-01-01', help = 'Start date for processing in YYYY-mm-dd format. Default is 2015-01-01.')
 parser.add_argument('--enddate', type = str, default = None, help = "End date for processing in YYYY-mm-dd format. If missing, today's date will be used.")
 parser.add_argument('--verbose', action = 'store_true', help = 'Display more messages during execution.')
 args = parser.parse_args()
+
+picklefile = os.path.join(ieo.catdir, 'sentinel2.pickle') # contains information on data saved in buckets.
+if os.path.isfile(picklefile):
+    print('Loading data from Sentinel 2 pickle file.')
+    with open(picklefile, 'rb') as handle:
+        scenedict = pickle.load(handle)
+else:
+    scenedict = {}
 
 if args.delay > 0: # if we want to delay execution for whatever reason
     from time import sleep
@@ -63,10 +72,10 @@ if args.delay > 0: # if we want to delay execution for whatever reason
 # fmasklist = glob.glob(os.path.join(args.fmaskdir, '*.dat'))
 
 reflist = []
-scenedict = {}
+
 filelist = []
 ProductDict = {}
-
+Prodlist = []
 # Create list of MGRS tiles to process
 
 if not args.MGRS:
@@ -119,14 +128,14 @@ errorfile = 'newlandsatimport_errors_{}.csv'.format(now.strftime('%Y%m%d_%H%M%S'
 #         if not 'ESA' == os.path.basename(f)[16:19]:
 #             reflist.append(f)
 
-for d in [ieo.Sen2srdir, ieo.Sen2evidir, ieo.Sen2ndvidir, ieo.Sen2ingestdir]:
+for d in [ieo.Sen2srdir, ieo.Sen2ndvidir, ieo.Sen2evidir, ieo.Sen2ndtidir, ieo.Sen2nbrdir, ieo.Sen2ingestdir]:
     if not os.path.isdir(d):
         print(f'Now creating missing directory: {d}')
         os.makedirs(d)
 
 # Now create the processing list
 
-scenedict = S3ObjectStorage.getSentinel2scenedict(MGRStilelist, startdate = startdate, enddate = enddate, verbose = args.verbose)
+scenedict = S3ObjectStorage.getSentinel2scenedict(MGRStilelist, startdate = startdate, enddate = enddate, verbose = args.verbose, scenedict = scenedict)
 
 # if args.infile: # This is in case a specific file has been selected for processing
 #     if os.access(args.infile, os.F_OK) and (args.infile.endswith('.tar.gz') or args.infile.endswith('.tar')):
@@ -157,31 +166,51 @@ scenedict = S3ObjectStorage.getSentinel2scenedict(MGRStilelist, startdate = star
 
 # Now process files that are in the list
 for bucket in sorted(scenedict.keys()):
-    print(f'Now processing files in bucket {bucket}.')
-    for year in sorted(scenedict[bucket].keys()):
-        for month in sorted(scenedict[bucket][year].keys()):
-            for day in sorted(scenedict[bucket][year][month].keys()):
-                numfiles = len(scenedict[bucket][year][month][day])
-                if numfiles > 0:
-                    
-                    print(f'There are {numfiles} scenes to be processed for date {year}/{month}/{day}.')
-                    filenum = 1
-                    for f in scenedict[bucket][year][month][day]:
-                        if f.endswith('/'):
-                            f = f[:-1]
-                        ProductID = os.path.basename(f)
-                        if args.verbose:
-                            print(f)
+    if bucket != 'lastupdate':
+        print(f'Now processing files in bucket {bucket}.')
+        for year in sorted(scenedict[bucket].keys()):
+            for month in sorted(scenedict[bucket][year].keys()):
+                for day in sorted(scenedict[bucket][year][month].keys()):
+                    numfiles = len(scenedict[bucket][year][month][day]['granules'])
+                    if numfiles > 0:
                         
-                    #        try:
-                        
-                        proddir = os.path.join(ieo.Sen2ingestdir, ProductID)
-                        if args.overwrite or not os.path.isdir(proddir):
-                            print(f'\nDownloading {ProductID} from bucket {bucket}, file number {filenum} of {numfiles}.\n')
-                            S3ObjectStorage.download_s3_folder(bucket, f, proddir)
-                        # This will be modified soon to process multiple Sentinel-2 tiles from the same day.
-                        print(f'Now importing scene {ProductID}.')
-                        ieo.importSentinel2totiles(proddir, remove = args.remove, overwrite = args.overwrite)
+                        print(f'There are {numfiles} scenes to be processed for date {year}/{month}/{day}.')
+                        filenum = 1
+                        for f in scenedict[bucket][year][month][day]['granules']:
+                            if f.endswith('/'):
+                                f = f[:-1]
+                            ProductID = os.path.basename(f)
+                            satellite = ProductID[:3]
+                            if args.verbose:
+                                print(f)                            
+                        #        try:
+                            proddir = os.path.join(ieo.Sen2ingestdir, ProductID)
+                            Prodlist.append(proddir)
+                            if args.overwrite or not os.path.isdir(proddir):
+                                print(f'\nDownloading {ProductID} from bucket {bucket}, file number {filenum} of {numfiles}.\n')
+                                S3ObjectStorage.download_s3_folder(bucket, f, proddir)
+                                filenum += 1
+                            # This will be modified soon to process multiple Sentinel-2 tiles from the same day.
+                        print(f'Now importing scenes for date {year}/{month}/{day}.')
+                        tilelist = ieo.importSentinel2totiles(Prodlist, remove = args.remove, overwrite = args.overwrite)
+                        if len(tilelist) > 0:
+                            for tile in tilelist:
+                                scenedict[bucket][year][month][day]['tiles'].append(tile)
+                                
+                                for d, z in zip([ieo.Sen2srdir, ieo.Sen2ndvidir, ieo.Sen2evidir, ieo.Sen2nbrdir, ieo.Sen2ndtidir], ['SR', 'NDVI', 'EVI', 'NBR', 'NDTI']):
+                                    copylist = glob.glob(os.path.join(d, f'{satellite}_{year}{month}{day}_{tile}.*'))
+                                    if len(copylist) > 0:
+                                        remotedir = f'{z}/{tile}/{year}/{month}/{day}'
+                                        S3ObjectStorage.copyfilestobucket(bucket = 'sentinel2', tagetdir = remotedir, filelist = copylist)
+                                        if args.removelocal:
+                                            for c in copylist:
+                                                print(f'Deleting from disk: {c}')
+                                                os.remove(c)
+                        print('Saving metadata to pickle file.')
+                        with open('filename.pickle', 'wb') as handle:
+                            pickle.dump(scenedict, handle, protocol = pickle.HIGHEST_PROTOCOL)
+                                    
+                                
                     #        except Exception as e:
                     #            print('There was a problem processing the scene. Adding to error list.')
                     #            exc_type, exc_obj, exc_tb = sys.exc_info()
@@ -191,6 +220,8 @@ for bucket in sorted(scenedict.keys()):
                     #            ieo.logerror(f, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
                         # else:
                         #     print('Scene {} has already been processed, skipping file number {} of {}.'.format(scene, filenum, numfiles))
-                        filenum += 1
+                        
+
+
 
 print('Processing complete.')

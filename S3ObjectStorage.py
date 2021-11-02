@@ -167,30 +167,33 @@ def getMundibucketList(sentinel, *args, **kwargs):
 #             ignorelist.append(os.path.basename(f)[:60])
 
 
-def getSentinel2scenedict(tilelist, *args, **kwargs):
+def getSentinel2scenedict(granulelist, *args, **kwargs):
     # verbose = kwargs.get('verbose', False)
     scenedict = kwargs.get('scenedict', {})
     datetuple = kwargs.get('startdate', datetime.datetime.strptime('2015-06-23', '%Y-%m-%d'))
     enddate = kwargs.get('enddate', datetime.datetime.now())
+    overridelastupdate = kwargs.get('overridelastupdate', False)
     # buckets = kwargs.get('bucket', getMundibucketList('2', verbose = verbose))
+    if 'lastupdate' in scenedict.keys():
+        lastupdate = scenedict['lastupdate']
+        if not overridelastupdate:
+            datetuple = lastupdate
+        
     if not scenedict:
         scenedict = {}
     print('Searching for scenes between {} and {}.'.format(datetuple.strftime('%Y-%m-%d'), enddate.strftime('%Y-%m-%d'))) 
     while datetuple <= enddate:
         # months = []
         # days = []
-        q = (datetuple.month - 1) // 3 + 1
-        # lastmonth = datetuple.month
-        
         if datetuple.year >= sensordict['2']['qyear']:
+            q = (datetuple.month - 1) // 3 + 1
             bucket = f's2-l2a-{datetuple.year}-q{q}'
         else:
-            bucket = f's2-l2a-{datetuple.year}'
-        if not 'q' in bucket:
             q = 4
+            bucket = f's2-l2a-{datetuple.year}'
         
-        for tile in tilelist:
-            print(f'Now searching bucket {bucket} for scenes of tile {tile}.')
+        for tile in granulelist:
+            print(f'Now searching bucket {bucket} for scenes of granule {tile}.')
             prefix = '{}/{}/{}/{}/'.format(tile[:2], tile[2:3], tile[3:], datetuple.year)
             result = s3cli.list_objects(Bucket = bucket, Prefix = prefix, Delimiter = '/')
             if isinstance(result.get('CommonPrefixes'), list):
@@ -213,7 +216,7 @@ def getSentinel2scenedict(tilelist, *args, **kwargs):
                         ProductID = parts[6]
                         pparts = ProductID.split('_')
                         prodtime = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
-                        year, month, day = pparts[3], pparts[4], pparts[5]
+                        year, month, day = pparts[2][:4], pparts[2][4:6], pparts[2][6:8]
                         if len(nresult.get('CommonPrefixes')) > 1:
                             i = 1
                             while i <= len(nresult.get('CommonPrefixes')): 
@@ -233,9 +236,11 @@ def getSentinel2scenedict(tilelist, *args, **kwargs):
                         if not month in scenedict[bucket][year].keys():
                             scenedict[bucket][year][month] = {}
                         if not day in scenedict[bucket][year][month].keys():
-                            scenedict[bucket][year][month][day] = []
+                            scenedict[bucket][year][month][day] = {}
+                            scenedict[bucket][year][month][day]['granules'] = [] # These are data saved on the Mundi buckets
+                            scenedict[bucket][year][month][day]['tiles'] = [] # These are processed files on the local Sentinel-2 bucket
                         print(f'Adding scene to processing list: {ProductID}')
-                        scenedict[bucket][year][month][day].append(o2file)
+                        scenedict[bucket][year][month][day]['granules'].append(o2file)
         if q == 4:
             year = datetuple.year + 1
             month = 1
@@ -244,7 +249,7 @@ def getSentinel2scenedict(tilelist, *args, **kwargs):
             year = datetuple.year
         day = 1
         datetuple = datetime.datetime.strptime(f'{year}-{month}-{day}', '%Y-%m-%d')
-      
+    scenedict['lastupdate'] = datetime.datetime.today()  
     return scenedict
                 
         
