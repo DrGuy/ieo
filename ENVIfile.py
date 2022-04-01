@@ -21,10 +21,13 @@ config = configparser.ConfigParser()
 # if ieoconfigdir:
 #     configfile = os.path.join(ieoconfigdir, 'ieo.ini')
 # else:
-configfile = 'config/ieo.ini'
-config_location = resource_filename(Requirement.parse('ieo'), configfile)
+# configfile = 'config/ieo.ini'
+# config_location = resource_filename(Requirement.parse('ieo'), configfile)
 # config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
-config.read(config_location) # config_path
+cwd = os.path.abspath(os.path.dirname(__file__))    
+print(cwd)
+configfile = os.path.join(cwd, 'config/ieo.ini')
+config.read(configfile) # config_path
 
 # Spatial variables
 prjvalstr = config['Projection']['proj']
@@ -187,8 +190,73 @@ headerdict['Sentinel-2'].update({
     'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.61, 2.19], # , 1.375
     'wavelength units': 'Micrometers',
     'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0075, 0.0075, 0.01, 0.0575, 0.01, 0.01, 0.045, 0.09], # , 0.015
-    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 6, 4, 1.5], # , 6
+    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 4, 1.5], # , 6
     'default bands': [12, 8, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_10m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_10m'].update({
+    'description': 'Sentinel-2 10m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Blue', 'Green', 'Red', 'NIR broad'], # sceneid , 'Cirrus'
+    'wavelength': [0.49, 0.56, 0.665, 0.842], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0325, 0.0175, 0.015, 0.0575], # , 0.015
+    'solar irradiance': [128, 128, 108, 103], # , 6
+    'default bands': [4, 3, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_20m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_20m'].update({
+    'description': 'Sentinel-2 20m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR narrow', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.705, 0.74, 0.783, 0.865, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0075, 0.0075, 0.01, 0.01, 0.045, 0.09], # , 0.015
+    'solar irradiance': [74.5, 68, 67, 52.5, 4, 1.5], # , 6
+    'default bands': [3, 2, 1],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_60m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_60m'].update({
+    'description': 'Sentinel-2 60m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Coastal aerosol', 'NIR water vapor'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.945], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.01, 0.01], # , 0.015
+    'solar irradiance': [129, 6], # , 6
+    # 'default bands': [12, 8, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['S2OLI'] = headerdict['default'].copy()
+headerdict['S2OLI'].update({
+    'description': 'Sentinel-2 OLI Equivalent Surface Reflectance (%s)',  # sceneid
+    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'NIR broad', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.842, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0575, 0.045, 0.09], # , 0.015
+    'solar irradiance': [129, 128, 128, 108, 103, 4, 1.5], # , 6
+    'default bands': [7, 5, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['S2TM'] = headerdict['default'].copy()
+headerdict['S2TM'].update({
+    'description': 'Sentinel-2 TM/ETM+ Equivalent Surface Reflectance (%s)',  # sceneid
+    'band names': ['Blue', 'Green', 'Red', 'NIR broad', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.49, 0.56, 0.665, 0.842, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0325, 0.0175, 0.015, 0.0575, 0.045, 0.09], # , 0.015
+    'solar irradiance': [128, 128, 108, 103, 4, 1.5], # , 6
+    'default bands': [6, 4, 1],
     'defaultbasefilename': '%s_ref.dat', # sceneid
     'data ignore value': 0 
     }) 

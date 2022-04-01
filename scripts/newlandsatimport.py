@@ -18,10 +18,11 @@ from osgeo import ogr
 try: # This is included as the module may not properly install in Anaconda.
     import ieo
 except:
-    ieodir = os.getenv('IEO_INSTALLDIR')
-    if not ieodir:
-        print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
-        ieodir = input('IEO installation path: ')
+    # ieodir = os.getenv('IEO_INSTALLDIR')
+    # if not ieodir:
+    ieodir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    # print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
+    # ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
         sys.path.append(ieodir)
         import ieo
@@ -44,6 +45,12 @@ parser.add_argument('-e', '--evidir', type = str, default = ieo.evidir, help = '
 parser.add_argument('-a', '--archdir', type = str, default = ieo.archdir, help = 'Original data archive directory')
 parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite existing files.')
 parser.add_argument('-d', '--delay', type = int, default = 0, help = 'Delay execution of script in seconds.')
+parser.add_argument('--CalcVIs', type = bool, default = True, help = 'Calculate vegetation indices. Default = True.')
+parser.add_argument('--removelocal', action = 'store_true', help = 'Remove local files after ingest.')
+parser.add_argument('--noNDVI', action = 'store_true', help = 'Do not calculate NDVI.')
+parser.add_argument('--noEVI', action = 'store_true', help = 'Do not calculate EVI.')
+parser.add_argument('--noNDTI', action = 'store_true', help = 'Do not calculate NDTI.')
+parser.add_argument('--noNBR', action = 'store_true', help = 'Do not calculate NBR.')
 parser.add_argument('-r', '--remove', type = bool, default = False, help = 'Remove temporary files after ingest.')
 args = parser.parse_args()
 
@@ -84,15 +91,19 @@ def sceneidfromfilename(filename):
 
 
 # Open up ieo.landsatshp and get the existing Product ID, Scene ID, and SR_path status
-driver = ogr.GetDriverByName("GPKG")
-data_source = driver.Open(ieo.catgpkg, 0)
-layer = data_source.GetLayer(ieo.landsatshp)
-for feature in layer:
-    sceneID = feature.GetField('sceneID')
-    productID = feature.GetField('LANDSAT_PRODUCT_ID_L2')
-    ProductDict[productID] = sceneID
-    scenedict[sceneID] = {'ProductID' : productID, 'sceneID' : sceneID, 'SR_path' : feature.GetField('Surface_Reflectance_tiles')}
-data_source = None
+if not ieo.usePostGIS:
+    driver = ogr.GetDriverByName("GPKG")
+    data_source = driver.Open(ieo.catgpkg, 0)
+else:
+    data_source = ogr.Open(ieo.catgpkg, 0)
+if data_source:
+    layer = data_source.GetLayer(ieo.landsatshp)
+    for feature in layer:
+        sceneID = feature.GetField('sceneID')
+        productID = feature.GetField('LANDSAT_PRODUCT_ID_L2')
+        ProductDict[productID] = sceneID
+        scenedict[sceneID] = {'ProductID' : productID, 'sceneID' : sceneID, 'SR_path' : feature.GetField('Surface_Reflectance_tiles')}
+    data_source = None
 
 # This look finds any existing processed data 
 for dir in [args.outdir, os.path.join(args.outdir, 'L1G')]:

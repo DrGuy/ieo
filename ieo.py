@@ -10,7 +10,6 @@
 # This contains code borrowed from the Python GDAL/OGR Cookbook: https://pcjericks.github.io/py-gdalogr-cookbook/
 
 import os, datetime, time, shutil, sys, glob, csv, ENVIfile, numpy, numexpr
-from xml.dom import minidom
 from subprocess import Popen
 from pkg_resources import resource_stream, resource_string, resource_filename, Requirement
 from ENVIfile import *
@@ -46,9 +45,12 @@ config = configparser.ConfigParser()
 # if ieoconfigdir:
 #     configfile = os.path.join(ieoconfigdir, 'ieo.ini')
 # else:
-configfile = 'config/ieo.ini'
-config_location = resource_filename(Requirement.parse('ieo'), configfile)
-config.read(config_location) # config_path
+cwd = os.path.abspath(os.path.dirname(__file__))    
+print(cwd)
+configfile = os.path.join(cwd, 'config/ieo.ini')
+# config_location = resource_filename(Requirement.parse('ieo'), configfile)
+# config.read(config_location) # config_path
+config.read(configfile)
 # fmaskdir = config['DEFAULT']['fmaskdir'] # Deprecated in version 1.5
 pixelqadir = config['Landsat']['pixelqadir']
 radsatqadir = config['Landsat']['radsatqadir']
@@ -74,6 +76,7 @@ NTS = config['VECTOR']['nationaltilesystem'] # For Ireland, the All-Ireland Rast
 Sen2tiles = config['VECTOR']['Sen2tiles'] # Sentinel-2 tiles for Ireland
 catgpkg = os.path.join(catdir, config['catalog']['catgpkg'])
 landsatshp = config['catalog']['landsat']
+Sen2shp = config['catalog']['Sen2shp']
 Sen2tilelist = config['Sentinel2']['S2tiles'].split(',')
 Sen2srdir = config['Sentinel2']['srdir'] # Surface Reflectance 
 Sen2ndvidir = config['Sentinel2']['ndvidir']
@@ -86,14 +89,28 @@ useS3 = config['S3']['useS3']
 useS3 = False
 if useS3 == 'Yes':
     tempprocdir = config['DEFAULT']['tempprocdir']
+    # archivebucket = config['S3']['archivebucket']
+    # landsatbucket = config['S3']['landsatdata']
+    import S3ObjectStorage as S3
     useS3 = True
-    archivebucket = config['S3']['archivebucket']
-    landsatbucket = config['S3']['landsatdata']
-    from S3ObjectStorage import *
 else:
     tempprocdir = None
     useS3 = False
 
+usePostGIS = config['PostGIS']['usePostGIS'] # This will override any geopackages and replace their values with PostGIS connections. It is assumed that the PostGIS password is saved in a .pgpass file
+# useS3 = False
+if usePostGIS == 'Yes':
+    server = config['PostGIS']['server']
+    user = config['PostGIS']['username']
+    ieoDBname = config['PostGIS']['ieoDBname']
+    catalogDBname = config['PostGIS']['catalogDBname']
+    ieogpkg = f'PG: host={server} dbname={ieoDBname} user={user}'
+    catgpkg = f'PG: host={server} dbname={catalogDBname} user={user}'
+    usePostGIS = True
+else:
+    usePostGIS = False
+    
+    
 # gdb_path = os.path.join(catdir, config['DEFAULT']['GDBname'])
 
 defaulterrorfile = os.path.join(logdir, 'errors.csv')
@@ -136,6 +153,21 @@ def logerror(f, message, *args, **kwargs):
     with open(errorfile, 'a') as output:
         output.write('%s, %s, %s\n'%(now.strftime('%Y-%m-%d %H:%M:%S'), f, message))
 
+def logerror_v2(f, e, *args, **kwargs):
+    # This function logs errors to an error file.
+    errorfile = kwargs.get('errorfile', defaulterrorfile)
+    dirname, basename = os.path.split(errorfile)
+    if not os.path.isdir(dirname):
+        errorfile = os.path.join(logdir, basename)
+    if not os.path.exists(errorfile):
+        with open(errorfile,'w') as output:
+            output.write('Time, Exclusion type, File, Line number\n')
+    now = datetime.datetime.now()
+    exc_type, exc_obj, exc_tb = sys.exc_info()
+    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+    print(exc_type, fname, exc_tb.tb_lineno)
+    with open(errorfile, 'a') as output:
+        output.write(f'{now.strftime("%Y-%m-%d %H:%M:%S")}, exc_type, f, exc_tb.tb_lineno\n')
 
 def extract_xml(s):
     # This function extracts metadata from XML files
@@ -146,6 +178,7 @@ def extract_xml(s):
     end  = s.rindex("<")
     s = str (s[start:end])
     return (s.strip())
+
 
 def get_landsat_fileparams(filename):
     # This function gets Landsat scene parameters from scene IDs
@@ -220,6 +253,7 @@ def makegrid(*args, **kwargs):
     # set up the shapefile driver
     if shapefile:
         driver = ogr.GetDriverByName("ESRI Shapefile")
+        
     else:
         driver = ogr.GetDriverByName("GPKG")
 
@@ -228,6 +262,9 @@ def makegrid(*args, **kwargs):
         indriver = ogr.GetDriverByName("ESRI Shapefile")
         inDataSource = indriver.Open(inshp, 0)
         inLayer = inDataSource.GetLayer()
+    elif usePostGIS:
+        inDataSource = ogr.Open(ieogpkg, 0)
+        inLayer = inDataSource.GetLayer(inshp)
     else: 
         inDataSource = driver.Open(ieogpkg, 0)
         inLayer = inDataSource.GetLayer(inshp)
@@ -240,6 +277,8 @@ def makegrid(*args, **kwargs):
         os.remove(outfile)
     if shapefile:
         data_source = driver.CreateDataSource(outfile)
+    elif usePostGIS:
+        data_source = ogr.Open(ieogpkg, 1)
     else: 
         data_source = driver.Open(ieogpkg, 1)
         
@@ -305,8 +344,11 @@ def makegrid(*args, **kwargs):
 def getfeaturesdict(*args, **kwargs):
     tiletype = kwargs.get('tiletype', None)
     featuredict = {}
-    driver = ogr.GetDriverByName("GPKG")
-    tile_ds = driver.Open(ieogpkg, 0)
+    if usePostGIS:
+        tile_ds = ogr.Open(ieogpkg, 0)
+    else:
+        driver = ogr.GetDriverByName("GPKG")
+        tile_ds = driver.Open(ieogpkg, 0)
     if tiletype.lower() == 'sentinel2':
         tilelayername = Sen2tiles
         fname = 'TILE_ID'
@@ -323,8 +365,11 @@ def getfeaturesdict(*args, **kwargs):
 def gettilelist(*args, **kwargs):
     tiletype = kwargs.get('tiletype', 'NTS')
     tilelist = []
-    driver = ogr.GetDriverByName("GPKG")
-    tile_ds = driver.Open(ieogpkg, 0)
+    if usePostGIS:
+        tile_ds = ogr.Open(ieogpkg, 0)
+    else:
+        driver = ogr.GetDriverByName("GPKG")
+        tile_ds = driver.Open(ieogpkg, 0)
     if tiletype.lower() == 'sentinel2':
         tilelayername = Sen2tiles
         fname = 'TILE_ID'
@@ -398,9 +443,11 @@ def checkscenegeometry(feature, *args, **kwargs):
     if verbose:
         print('{} scene centre coordinates are {:0.1f} E, {:0.1f} N.'.format(projacronym, X, Y))
 
-    driver = ogr.GetDriverByName("GPKG")
-#    gdb, wrs = os.path.split(polygon)
-    ds = driver.Open(ieogpkg, 0)
+    if usePostGIS:
+        ds = ogr.Open(ieogpkg, 0)
+    else:
+        driver = ogr.GetDriverByName("GPKG")
+        ds = driver.Open(ieogpkg, 0)
     layer = ds.GetLayer(polygon)
     found = False
     while not found:
@@ -455,9 +502,11 @@ def checkscenelocation(scene, dst = 50.0): # This function assesses geolocation 
     Y = (float(latmax.getOutput(0)) + float(latmin.getOutput(0))) / 2.
     print('{} scene centre coordinates are {:0.1f} E, {:0.1f} N.'.format(projacronym, X, Y))
 
-    driver = ogr.GetDriverByName("GPKG")
-#    gdb, wrs = os.path.split(polygon)
-    ds = driver.Open(ieogpkg, 0)
+    if usePostGIS:
+        ds = ogr.Open(ieogpkg, 0)
+    else:
+        driver = ogr.GetDriverByName("GPKG")
+        ds = driver.Open(ieogpkg, 0)
     layer = ds.GetLayer(polygon)
     found = False
     while not found:
@@ -520,7 +569,7 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     tileshp = kwargs.get('tileshp', NTS) 
     pixelqa = kwargs.get('pixelqa', True) # determines whether to search for Pixel and Radsat QA files
     rewriteheader = kwargs.get('rewriteheader', True)
-    overwrite = kwargs.get('overwrite', True) # overwrite existing files without updating, deleting any tiles first.
+    overwrite = kwargs.get('overwrite', False) # overwrite existing files without updating, deleting any tiles first.
     noupdate = kwargs.get('noupdate', False) # if set to True, will not update existing tiles with new data.
     feature = kwargs.get('feature', None)
     ext = kwargs.get('ext', 'dat') # file extension of raster files. Assumes ENVI format
@@ -529,10 +578,18 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     timestr = kwargs.get('timestr', None) # UTC format timestring. Format: "YYYY-mm-ddTHH:MM:SSZ"
     sceneid = kwargs.get('sceneid', None) # Landsat SceneID
     ProductID = kwargs.get('ProductID', None) # ProductID for eithe Landsat or Sentinel 2
-    CalcVIs = kwargs.get('CalcVIs', True) # Calculate vegetation indices at time of tile generation
+    CalcVIs = kwargs.get('CalcVIs', False) # Calculate vegetation indices at time of tile generation
+    
+    CalcNDVI = kwargs.get('CalcNDVI', True)
+    CalcEVI = kwargs.get('CalcEVI', True)
+    CalcNBR = kwargs.get('CalcNBR', True)
+    CalcNDTI = kwargs.get('CalcNDTI', True)
+    
     outtilelist = []
     acqtime = None
     sceneids = []
+    indir, inbasename = os.path.split(infile)
+    
     if timestr:
         acqtime = f'acquisition time = {timestr}'
     elif datestr:
@@ -553,9 +610,12 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
             acqtime = envihdracqtime(infile.replace('.{}'.format(ext), '.hdr'))
         except:
             acqtime = None
-    driver = ogr.GetDriverByName("GPKG")
-    if (not feature) and (not satellite):
-        data_source = driver.Open(catgpkg, 1) # opened with write access as LEDAPS data will be updated
+    if (not feature) and (not satellite) and (not inbasename.startswith('S')):
+        if usePostGIS:
+            data_source = ogr.Open(catgpkg, 1)
+        else:
+            driver = ogr.GetDriverByName("GPKG")
+            data_source = driver.Open(catgpkg, 1) # opened with write access as LEDAPS data will be updated
         layer = data_source.GetLayer(inshp)
         closeinfunc = True
     else:
@@ -564,7 +624,6 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
         
 #        tilesfield = ogr.FieldDefn('tiles', ogr.OFTString)
 #        layer.CreateField(tilesfield)
-    indir, inbasename = os.path.split(infile)
     if (not sceneid) and (not satellite) and (not ProductID) and (not inbasename.startswith('S')):
         sceneid = inbasename[:21] # optimised now for Landsat. Must change for IEO 2.0
         datetuple = datetime.datetime.strptime(sceneid[9:16], '%Y%j')
@@ -574,7 +633,10 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     else: 
         datetuple = datetime.datetime.strptime(datestr, '%Y%m%d')
     
-    tile_ds = driver.Open(ieogpkg, 0)
+    if usePostGIS:
+        tile_ds = ogr.Open(ieogpkg, 0)
+    else:
+        tile_ds = driver.Open(ieogpkg, 0)
     tilelayer = tile_ds.GetLayer(tileshp)
     
 #    hdr = isenvifile(infile)
@@ -587,20 +649,22 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
     
     src_ds = gdal.Open(infile)
     gt = src_ds.GetGeoTransform()
-    
-    # create scene geometry polygon
-    minX = gt[0]
-    maxY = gt[3]
-    maxX = gt[0] + gt[1] * src_ds.RasterXSize
-    minY = gt[3] + gt[5] * src_ds.RasterYSize
-    ring = ogr.Geometry(ogr.wkbLinearRing)
-    ring.AddPoint(minX, maxY)
-    ring.AddPoint(maxX, maxY)
-    ring.AddPoint(maxX, minY)
-    ring.AddPoint(minX, minY)
-    ring.AddPoint(minX, maxY)
-    rasterGeometry = ogr.Geometry(ogr.wkbPolygon)
-    rasterGeometry.AddGeometry(ring)
+    if not satellite: # Landsat only
+        # create scene geometry polygon
+        minX = gt[0]
+        maxY = gt[3]
+        maxX = gt[0] + gt[1] * src_ds.RasterXSize
+        minY = gt[3] + gt[5] * src_ds.RasterYSize
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        ring.AddPoint(minX, maxY)
+        ring.AddPoint(maxX, maxY)
+        ring.AddPoint(maxX, minY)
+        ring.AddPoint(minX, minY)
+        ring.AddPoint(minX, maxY)
+        rasterGeometry = ogr.Geometry(ogr.wkbPolygon)
+        rasterGeometry.AddGeometry(ring)
+    else:
+        rasterGeometry = feature.GetGeometryRef() # Sentinel-2, will also become default for Landsat in next version
     
 #    fieldnamedict = {'Fmask_tiles' : ['Fmask'],
 #        'Pixel_QA_tiles' : ['pixel_qa'],
@@ -609,15 +673,24 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
 #        'NDVI_tiles' : ['NDVI'],
 #        'EVI_tiles' : ['EVI']}
     fieldnamedict = {#'Fmask' : 'Fmask_tiles',
-        'pixel_qa' : 'Pixel_QA_tiles',
-        'QA_RADSAT' : 'Radsat_QA_tiles',
-        'SR_QA_AEROSOL' : 'Aerosol_QA_tiles',
-        'Landsat ST' : 'Surface_temperature_tiles',
+        'ref' : 'Surface_reflectance_tiles',
+        }
+    if not rastertype in ['Sentinel2', 'S2TM', 'S2OLI']:
+        appendict = {
+                     'pixel_qa' : 'Pixel_QA_tiles',
+                    'QA_RADSAT' : 'Radsat_QA_tiles',
+                    'SR_QA_AEROSOL' : 'Aerosol_QA_tiles',
+                    'Landsat ST' : 'Surface_temperature_tiles',}
+        for key in appendict.keys():
+            fieldnamedict[key] = appendict[key]
         # 'Landsat TIR' : 'Brightness_temperature_tiles', #[, 'Landsat Band6'],
         # 'Landsat Band6' : 'Brightness_temperature_tiles', #[, ],
-        'ref' : 'Surface_reflectance_tiles', #['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
-        'NDVI' : 'NDVI_tiles',
-        'EVI' : 'EVI_tiles'}
+        # 'ref' : 'Surface_reflectance_tiles', #['Landsat TM', 'Landsat ETM+', 'Landsat OLI', 'Sentinel-2'],
+        if CalcVIs:
+            if CalcNDVI: fieldnamedict['NDVI'] = 'NDVI_tiles'
+            if CalcEVI: fieldnamedict['EVI'] = 'EVI_tiles'
+            if CalcNDTI: fieldnamedict['NDTI'] = 'NDTI_tiles'
+            if CalcNBR: fieldnamedict['NBR'] = 'NBR_tiles'
     fieldname = None
     if rastertype in fieldnamedict.keys():
          fieldname = fieldnamedict[rastertype]
@@ -645,8 +718,10 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
             sid = sceneid
     tilebaseset = False
     setfieldnamestr = False
-    if feature:
+    if feature and not satellite:
         tilebasestr = feature.GetField('Tile_filename_base')
+    elif feature and satellite:
+        tilebasestr = f'{satellite}_{datestr}'
     if fieldname and not satellite:
         fieldnamestr = feature.GetField(fieldname)
     
@@ -656,6 +731,7 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
 #                print(tilename)
 #                print(tilegeom.Intersect(featgeom))
         if tilegeom.Intersect(rasterGeometry): # and not sceneid[9:16] in getbadlist():
+            # intersect = tilegeom.Intersection(rasterGeometry)
             if pixelqa:
                 basedir = os.path.dirname(outdir)
                 tileqafile = os.path.join(os.path.join(basedir, 'pixel_qa'), '{}_{}.dat'.format(outbasename, tilename))
@@ -666,7 +742,16 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
             print('Now creating tile {} of type {} for SceneID {}.'.format(tilename, rastertype, sid))
 #                    print(headerdict['description'])
 #            try:
-            result = makerastertile(tile, src_ds, gt, outdir, outbasename, infile, rastertype, pixelqadata = pixelqadata, SceneID = sid, rewriteheader = rewriteheader, acqtime = acqtime, noupdate = noupdate, overwrite = overwrite, ProductID = ProductID, CalcVIs = CalcVIs)
+            result = makerastertile(tile, src_ds, gt, outdir, outbasename, \
+                                    infile, rastertype, \
+                                    pixelqadata = pixelqadata, SceneID = sid, \
+                                    rewriteheader = rewriteheader, \
+                                    acqtime = acqtime, noupdate = noupdate, \
+                                    overwrite = overwrite, \
+                                    ProductID = ProductID, \
+                                      CalcVIs = CalcVIs, CalcNDVI = CalcNDVI, \
+                                      CalcEVI = CalcEVI, CalcNDTI = CalcNDTI, \
+                                      CalcNBR = CalcNBR)
 #            except Exception as e:
 #                logerror(outbasename, e)
 #                print('ERROR: {}: {}'.format(outbasename, e))
@@ -703,17 +788,19 @@ def converttotiles(infile, outdir, rastertype, *args, **kwargs):
                 outtilelist.append(tilename)
                         
                 
-    if layer:
+    if layer or feature:
         if setfieldnamestr:
             feature.SetField(fieldname, fieldnamestr)
         if closeinfunc:
             layer.SetFeature(feature)
     
     del tile_ds
-    if not closeinfunc:
+    # if satellite:
+    #     return outtilelist
+    if not closeinfunc: #and not satellite:
         return feature
-    elif len(outtilelist) > 0:
-        return outtilelist
+    # elif len(outtilelist) > 0:
+    #     return outtilelist
     else:
         del src_ds        
         del pixelqadata
@@ -736,19 +823,29 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     rewriteheader = kwargs.get('rewriteheader', True)
     bucket = kwargs.get('bucket', 'landsat')
     acqtime = kwargs.get('acqtime', None)
-    noupdate = kwargs.get('noupdate', False) # This will prevent the function from updating the tile with new data
-    overwrite = kwargs.get('overwrite', False) # This will delete any existing tile data
-    CalcVIs = kwargs.get('CalcVIs', True) # Calculate vegetation indices at time of tile generation
+    # intersect = kwargs.get('intersect', None)
+    # noupdate = kwargs.get('noupdate', False) # This will prevent the function from updating the tile with new data
+    # overwrite = kwargs.get('overwrite', False) # This will delete any existing tile data
+    CalcVIs = kwargs.get('CalcVIs', False) # Calculate vegetation indices at time of tile generation
+    if CalcVIs:
+        CalcNDVI = kwargs.get('CalcNDVI', True)
+        CalcEVI = kwargs.get('CalcEVI', True)
+        CalcNBR = kwargs.get('CalcNBR', True)
+        CalcNDTI = kwargs.get('CalcNDTI', True)
     tilename = tile.GetField('Tile')
     tilegeom = tile.GetGeometryRef()
     outfile = os.path.join(outdir, '{}_{}.dat'.format(outbasename, tilename))
     parentrasters =[inrastername]
     if useS3:
         parts = outbasename.split('_')
-        prefix = '{}/{}/{}'.format(os.path.basename(outdir), parts[2], parts[1][:4])
+        print(f'outbasename = {outbasename}')
+        # if outbasename.startswith('S'):
+        prefix = f'{os.path.basename(outdir)}/{tilename}/{parts[1][:4]}/{parts[1][4:6]}/{parts[1][6:8]}'
+        # else:
+        #     prefix = '{}/{}/{}'.format(os.path.basename(outdir), tilename, parts[1][:4])
         for ext in ['dat', 'hdr']:
             s3_object = '{}/{}.{}'.format(prefix, outbasename, ext)
-            downloadfile(outdir, bucket, s3_object)
+            S3.downloadfile(outdir, bucket, s3_object)
     if rastertype == 'ref': #, 'Landsat TIR', 'Landsat Band6']:
         print('SceneID = {}'.format(SceneID))
         if SceneID[2:3] in ['8', '9']: # and not (rastertype in ['Landsat TIR', 'Landsat Band6']):
@@ -761,7 +858,7 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     if not ndval:
         ndval = 0
     print('hdtype = {}, data ignore value = {}'.format(hdtype, ndval))
-    if os.path.isfile(outfile) and not overwrite and not update: # skips this tile if the tile is not to be overwritten or updated.
+    if (os.path.isfile(outfile)) and (not overwrite) and (not update): # skips this tile if the tile is not to be overwritten or updated.
         print('The tile {} exists already on disk, and both overwrite and update flags are set to False. Skipping this tile,'.format(os.path.basename(tilename)))
         return False
     minX, maxX, minY, maxY = tilegeom.GetEnvelope()
@@ -775,12 +872,24 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     bands = src_ds.RasterCount
     print('Processing tile: {}'.format(tilename))
     dims = [minX, maxY, maxX, minY]
+    tileextent = [geoTrans[0], geoTrans[3] + geoTrans[5] * rows,
+              geoTrans[0] + geoTrans[1] * cols, geoTrans[3]]
     
 #    print('Output columns: {}'.format(cols))
 #    print('Output rows: {}'.format(rows))
     # determine extent of tile, etc.   
     extent = [gt[0], gt[3], gt[0] + gt[1] * src_ds.RasterXSize, gt[3] + gt[5] * src_ds.RasterYSize]
+    
     #                if checkintersect(tilegeom, extent):
+    # if intersect:
+    #     print('Extent')
+    #     print(extent)
+        
+    #     lX, rX, rY, lY = intersect.GetEnvelope()
+    #     print(f'lX = {lX}, rX = {rX}, rY = {rY}, lY = {lY}')
+    #     ul = [lX, lY]
+    #     lr = [rX, rY]
+    # else:
     ul = [max(dims[0], extent[0]), min(dims[1], extent[1])]
     lr = [min(dims[2], extent[2]), max(dims[3], extent[3])]
 #    print('raster ul:')
@@ -789,30 +898,40 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
 #    print(lr)
 #    print('Tile coordinates (minX, maxY, maxX, minY): {}, {}, {}, {}'.format(minX, maxY, maxX, minY))
     px, py = world2Pixel(geoTrans, ul[0], ul[1])
-    if px < 0:
-        px = 0
-    if py < 0:
-        py = 0
+    ulx, uly = world2Pixel(gt, ul[0], ul[1])
     plx, ply = world2Pixel(geoTrans, lr[0], lr[1])
-    if plx >= extent[0]:
-        plx = extent[0]-1
-    if ply >= extent[1]:
-        ply = extent[1]-1
-    pX, pY = pixel2world(geoTrans, px, py)
-    plX, plY = pixel2world(geoTrans, plx, ply)
-    ulx,uly = world2Pixel(gt, pX, pY)
-    if ulx < 0:
-        ulx = 0
-    lrx,lry = world2Pixel(gt, plX, plY)
-    if lrx >= src_ds.RasterXSize:
-        lrx = src_ds.RasterXSize - 1 
-    if uly >= src_ds.RasterYSize:
-        uly = src_ds.RasterYSize - 1
-    if lry < 0:
-        lry = 0 
+    lrx, lry = world2Pixel(gt, lr[0], lr[1])
+    # print(f'plx - px = {plx - px}, ply - py = {ply - py}, lrx - ulx = {lrx - ulx}, lry - uly = {lry - uly}')
+    # if px < 0:
+    #     px = 0
+    # if py < 0:
+    #     py = 0
+    # plx, ply = world2Pixel(geoTrans, lr[0], lr[1])
+    # if plx >= extent[0]:
+    #     plx = extent[0] - 1
+    # if ply >= extent[1]:
+    #     ply = extent[1] - 1
+    # pX, pY = pixel2world(geoTrans, px, py)
+    # plX, plY = pixel2world(geoTrans, plx, ply)
+    # ulx, uly = world2Pixel(gt, pX, pY)
+    # if ulx < 0:
+    #     ulx = 0
+    # if uly < 0:
+    #     uly = 0
+    # lrx, lry = world2Pixel(gt, plX, plY)
+    # if lrx >= src_ds.RasterXSize:
+    #     lrx = src_ds.RasterXSize - 1 
+    # if lry >= src_ds.RasterYSize:
+    #     lry = src_ds.RasterYSize - 1
+    # if lry < 0:
+    #     lry = 0 
     
-    dx = plx-px + 1
-    dy = ply-py + 1
+    # dx = plx - px + 1
+    # dy = ply - py + 1
+    # if ulx + dx > src_ds.RasterXSize - 1:
+    #     plx = src_ds.RasterXSize - ulx - 1
+    # if uly + dy > src_ds.RasterYSize - 1:
+    #     ply = src_ds.RasterYSize - uly - 1
 #    print('ulx = {}, uly = {}, dx = {}, dy = {}.'.format(ulx, uly, dx - 1, dy - 1))
 #    print('plx = {}, ply = {}, px = {}, py = {}.'.format(plx, ply, px, py))
 #    if isinstance(pixelqadata, numpy.ndarray):
@@ -866,8 +985,8 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
         outtile = numpy.full(shape, ndval, dtype = dt)
         
         if os.path.isfile(outfile):
-            if noupdate:
-                print('noupdate has been set to True, skipping file.')
+            if not update:
+                print('update has been set to False, skipping file.')
                 return False
             elif overwrite:
                 print('Deleting existing tile.')
@@ -885,14 +1004,23 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
     #            outheaderdict = headerdict['default'].copy()
         else:
             parentrasters = makeparentrastersstring([os.path.basename(inrastername)])
-    
+        
+        tempDs = gdal.Warp('', src_ds, #xRes = geoTrans[1],
+                      # yRes = geoTrans[5], 
+                      outputBounds = tileextent,
+                      height = rows, width = cols, 
+                      dstSRS = prj, 
+                      dstNodata = ndval,#cutline = tile,
+                      # cropToCutline = True, cutlineLayer = tile,# resampleAlg = resample_alg,
+                      format = "MEM")
+        
         for i in range(bands):
             if os.path.isfile(outfile):
                 band = out_ds.GetRasterBand(i + 1).ReadAsArray()
             else:
                 band = numpy.full((rows, cols), ndval, dtype = dt)
-            tiledata = numpy.full((rows, cols), ndval, dtype = dt)
-            tiledata[py:ply, px:plx] = src_ds.GetRasterBand(i + 1).ReadAsArray(ulx, uly, dx - 1, dy - 1)
+            # tiledata = numpy.full((rows, cols), ndval, dtype = dt)
+            tiledata = tempDs.GetRasterBand(i + 1).ReadAsArray() # [py:ply, px:plx], ulx, uly, lrx, lry
     #            print('pixelqatile shape:')
     #            print(pixelqatile.shape)
     #            print('tiledata shape:')
@@ -924,7 +1052,10 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
         ENVIfile(outtile, rastertype, geoTrans = geoTrans, outfilename = outfile, parentrasters = parentrasters, SceneID = SceneID, acqtime = acqtime, ProductID = ProductID).Save()
         if CalcVIs:
             print('Calculating vegetation indices.')
-            calcvis(outfile, qafile = None, useqamask = False)
+            calcvis(outfile, qafile = None, useqamask = False, useTile = True, \
+                          CalcNDVI = CalcNDVI, \
+                          CalcEVI = CalcEVI, CalcNDTI = CalcNDTI, \
+                          CalcNBR = CalcNBR, inrastertype = rastertype)
     #    p = Popen(['gdal_translate', '-projwin', extent[0], extent[1], extent[2], extent[3], '-of', 'ENVI', in_raster, out_raster])
     #    print(p.communicate())
     #    if rewriteheader:
@@ -936,6 +1067,7 @@ def makerastertile(tile, src_ds, gt, outdir, outbasename, inrastername, rasterty
         print('No useful pixels in tile, skipping.')
     outtile = None
     band = None
+    tempDs = None
     pixelqatile = None
     return True
 
@@ -1106,6 +1238,11 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     ProductID = kwargs.get('ProductID', None)
     satellite = kwargs.get('satellite', None)
     useTile = kwargs.get('useTile', False)
+    CalcNDVI = kwargs.get('CalcNDVI', True)
+    CalcEVI = kwargs.get('CalcEVI', True)
+    CalcNBR = kwargs.get('CalcNBR', True)
+    CalcNDTI = kwargs.get('CalcNDTI', True)
+    inrastertype = kwargs.get('inrastertype', None)
     # usefmask = kwargs.get('usefmask', False)
     # usecfmask = kwargs.get('usecfmask', False)
     dirname, basename = os.path.split(refitm)
@@ -1121,8 +1258,9 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     outdir = kwargs.get('outdir', dirname)
     # fmaskfile = os.path.join(fmaskdir,'{}_cfmask.dat'.format(sceneid))
     if refitm.endswith('.dat'):
-        parentrasters
-    parentrasters = [os.path.basename(refitm)]
+        parentrasters = envihdrparentrasters(refitm[:-3] + 'hdr')
+    else:
+        parentrasters = [os.path.basename(refitm)]
     # if useqamask:
     #     if not os.path.isfile(qafile):
     #         usefmask = False
@@ -1138,7 +1276,7 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     #         else:
     #             parentrasters.append(os.path.basename(fmaskfile))
 
-    print('Calculating NDVI for scene {}.'.format(sceneid))
+    
     refobj = gdal.Open(refitm)
 
     # Get file geometry
@@ -1162,73 +1300,80 @@ def calcvis(refitm, *args, **kwargs): # This should calculate a masked NDVI.
     else:
         print('Warning: No Fmask file found for scene {}.'.format(sceneid))
         fmask = None
-    if basename[2:3] in ['8', '9']:
+    if basename[2:3] in ['8', '9'] or inrastertype == 'S2OLI':
         NIR = refobj.GetRasterBand(5).ReadAsArray()
         red = refobj.GetRasterBand(4).ReadAsArray()
-        blue = refobj.GetRasterBand(2).ReadAsArray()
-        swir1 = refobj.GetRasterBand(6).ReadAsArray()
-        swir2 = refobj.GetRasterBand(7).ReadAsArray()
+        if CalcEVI: blue = refobj.GetRasterBand(2).ReadAsArray()
+        if CalcNDTI: swir1 = refobj.GetRasterBand(6).ReadAsArray()
+        if CalcNDTI or CalcNBR: swir2 = refobj.GetRasterBand(7).ReadAsArray()
+    elif basename.startswith('S2') and inrastertype != 'S2TM':
+        NIR = refobj.GetRasterBand(8).ReadAsArray()
+        red = refobj.GetRasterBand(4).ReadAsArray()
+        if CalcEVI: blue = refobj.GetRasterBand(2).ReadAsArray()
+        if CalcNDTI: swir1 = refobj.GetRasterBand(11).ReadAsArray()
+        if CalcNDTI or CalcNBR: swir2 = refobj.GetRasterBand(12).ReadAsArray()        
+    else:
+        NIR = refobj.GetRasterBand(4).ReadAsArray()
+        red = refobj.GetRasterBand(3).ReadAsArray()
+        if CalcEVI: blue = refobj.GetRasterBand(1).ReadAsArray()
+        if CalcNDTI: swir1 = refobj.GetRasterBand(5).ReadAsArray()
+        if CalcNDTI or CalcNBR: swir2 = refobj.GetRasterBand(6).ReadAsArray()
+    
+    if basename.startswith('L'):
         ndvioutdir = ndvidir
         evioutdir = evidir
         ndtioutdir = ndtidir
         nbroutdir = nbrdir
-    elif basename.startswith('S2'):
-        NIR = refobj.GetRasterBand(8).ReadAsArray()
-        red = refobj.GetRasterBand(4).ReadAsArray()
-        blue = refobj.GetRasterBand(2).ReadAsArray()
-        swir1 = refobj.GetRasterBand(11).ReadAsArray()
-        swir2 = refobj.GetRasterBand(12).ReadAsArray()
+    else:
         ndvioutdir = Sen2ndvidir
         evioutdir = Sen2evidir
         ndtioutdir = Sen2ndtidir
         nbroutdir = Sen2nbrdir
-    else:
-        NIR = refobj.GetRasterBand(4).ReadAsArray()
-        red = refobj.GetRasterBand(3).ReadAsArray()
-        blue = refobj.GetRasterBand(1).ReadAsArray()
-        swir1 = refobj.GetRasterBand(5).ReadAsArray()
-        swir2 = refobj.GetRasterBand(6).ReadAsArray()
-        ndvioutdir = ndvidir
-        evioutdir = evidir
-        ndtioutdir = ndtidir
-        nbroutdir = nbrdir
 
     # NDVI calculation
-    NDVI = NDindex(NIR, red, fmask = fmask)
-    parentrasters = makeparentrastersstring(parentrasters)
-    if useTile:
-        outfile = os.path.join(ndvioutdir, basename)
-        ENVIfile(NDVI, 'NDVI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
-    else:
-        ENVIfile(NDVI, 'NDVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
-    NDVI = None
-    print('Calculating EVI for scene {}.'.format(sceneid))
+    if CalcNDVI:
+        print('Calculating NDVI for scene {}.'.format(sceneid))
+        NDVI = NDindex(NIR, red, fmask = fmask)
+        if parentrasters:
+            parentrasters = makeparentrastersstring(parentrasters)
+        else:
+            parentrasters = [refitm]
+        if useTile:
+            outfile = os.path.join(ndvioutdir, basename)
+            ENVIfile(NDVI, 'NDVI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
+        else:
+            ENVIfile(NDVI, 'NDVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+        NDVI = None
     # EVI calculation
-    evi = EVI(blue, red, NIR, fmask = fmask)
-    if useTile:
-        outfile = os.path.join(evioutdir, basename)
-        ENVIfile(evi, 'EVI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
-    else:
-        ENVIfile(evi, 'EVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
-    evi = None
+    if CalcEVI:
+        print('Calculating EVI for scene {}.'.format(sceneid))
+        evi = EVI(blue, red, NIR, fmask = fmask)
+        if useTile:
+            outfile = os.path.join(evioutdir, basename)
+            ENVIfile(evi, 'EVI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
+        else:
+            ENVIfile(evi, 'EVI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+        evi = None
     # NDTI calculation
-    print('Calculating NDTI for scene {}.'.format(sceneid))
-    NDTI = NDindex(swir1, swir2, fmask = fmask)
-    if useTile:
-        outfile = os.path.join(ndtioutdir, basename)
-        ENVIfile(NDTI, 'NDTI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
-    else:
-        ENVIfile(NDTI, 'NDTI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
-    NDTI = None
+    if CalcNDTI:
+        print('Calculating NDTI for scene {}.'.format(sceneid))
+        NDTI = NDindex(swir1, swir2, fmask = fmask)
+        if useTile:
+            outfile = os.path.join(ndtioutdir, basename)
+            ENVIfile(NDTI, 'NDTI', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
+        else:
+            ENVIfile(NDTI, 'NDTI', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+        NDTI = None
     # NDVI calculation
-    print('Calculating NBR for scene {}.'.format(sceneid))
-    NBR = NDindex(NIR, swir2, fmask = fmask)
-    if useTile:
-        outfile = os.path.join(nbroutdir, basename)
-        ENVIfile(NBR, 'NBR', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
-    else:
-        ENVIfile(NBR, 'NBR', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
-    NBR = None
+    if CalcNBR:
+        print('Calculating NBR for scene {}.'.format(sceneid))
+        NBR = NDindex(NIR, swir2, fmask = fmask)
+        if useTile:
+            outfile = os.path.join(nbroutdir, basename)
+            ENVIfile(NBR, 'NBR', geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters, outfilename = outfile).Save()
+        else:
+            ENVIfile(NBR, 'NBR', outdir = outdir, geoTrans = geoTrans, SceneID = sceneid, acqtime = acqtime, parentrasters = parentrasters).Save()
+        NBR = None
     
     NIR = None
     red = None
@@ -1342,6 +1487,12 @@ def importespatotiles(f, *args, **kwargs):
     useProdID = kwargs.get('useProductID', useProductID) # Name files using new Landsat Collection 2 Product ID rather than old Scene ID
     S3tarfilepath = kwargs.get('S3tarfilepath', 'landsat') # This is for archiving input files after ingestion only.
     S3tarfilebucket = kwargs.get('S3tarfilebucket', 'ingested') # This is for archiving input files after ingestion only.
+    S3tilebucket = kwargs.get('S3tilebucket', 'landsat')
+    CalcVIs = kwargs.get('calcVIs', True)
+    CalcNDVI = kwargs.get('CalcNDVI', True)
+    CalcEVI = kwargs.get('CalcEVI', True)
+    CalcNBR = kwargs.get('CalcNBR', True)
+    CalcNDTI = kwargs.get('CalcNDTI', True)
     btimg = None
     masktype = None
     basename = os.path.basename(f)
@@ -1413,8 +1564,12 @@ def importespatotiles(f, *args, **kwargs):
 
     # open landsat shapefile (starting version 1.1.1)
     sceneid = None
-    driver = ogr.GetDriverByName("GPKG")
-    data_source = driver.Open(catgpkg, 1) # opened with write access as LEDAPS data will be updated
+    if usePostGIS:
+        data_source = ogr.Open(catgpkg, 1)
+    else:
+        driver = ogr.GetDriverByName("GPKG")
+        data_source = driver.Open(catgpkg, 1)
+     # opened with write access as LEDAPS data will be updated
     layer = data_source.GetLayer(landsatshp)
     ldefn = layer.GetLayerDefn()
     schema = [ldefn.GetFieldDefn(n).name for n in range(ldefn.GetFieldCount())]
@@ -1591,6 +1746,59 @@ def importespatotiles(f, *args, **kwargs):
             reproject(btimg, BT_ITM, rastertype = rastertype, sceneid = sceneid, parentrasters = parentrasters)
         feat = converttotiles(BT_ITM, stdir, rastertype, pixelqa = True, feature = feat, overwrite = overwrite, noupdate = noupdate)
         layer.SetFeature(feat)
+    if useS3:
+        tilebase = feat.GetField('Tile_filename_base')
+        year, month, day = tilebase[4:8], tilebase[8:10], tilebase[10:12]
+        fieldnamedict = {#'Fmask' : 'Fmask_tiles',
+        'SR' : {
+            'fieldName' : 'Surface_reflectance_tiles',
+            'dirname' : srdir
+            },
+        'pixel_qa' : {
+            'fieldName' : 'Pixel_QA_tiles',
+            'dirname' : pixelqadir
+            },
+        'radsat_qa' : {
+            'fieldName' : 'Radsat_QA_tiles',
+            'dirname' : radsatqadir
+            },
+        'aerosol_qa' : {
+            'fieldName' : 'Aerosol_QA_tiles',
+            'dirname' : aerosolqadir
+            },
+        'ST' : {
+            'fieldName' : 'Surface_temperature_tiles',
+            'dirname' : stdir
+            }
+        }
+        feat.SetField('S3_tile_bucket', 'landsat')
+        feat.SetField('S3_ingest_bucket', S3tarfilebucket)
+        feat.SetField('S3_endpoint_URL',  config['S3']['endpoint_url'])
+        now = datetime.datetime.now()
+        feat.SetField('Raster_Ingest_Time', now.strftime('%Y-%m-%d %H:%M:%S'))
+        if CalcVIs:
+            if CalcNDVI: fieldnamedict['NDVI'] = {'fieldName' : 'NDVI_tiles', 'dirname' : ndvidir}
+            if CalcEVI: fieldnamedict['EVI'] = {'fieldName' : 'EVI_tiles', 'dirname' : evidir}
+            if CalcNDTI: fieldnamedict['NDTI'] = {'fieldName' : 'NDTI_tiles', 'dirname' : ndtidir}
+            if CalcNBR: fieldnamedict['NBR'] = {'fieldName' : 'NBR_tiles', 'dirname' : nbrdir}
+        for key in fieldnamedict.keys():
+            tilestr = feat.GetField(fieldnamedict[key]['fieldName'])
+            if tilestr:
+                tiles = tilestr.split(',')
+                for tile in tiles:
+                    for ext in ['hdr', 'dat']:
+                        filename = os.path.join(fieldnamedict[key]['dirname'], f'{tilebase}_{tile}.{ext}')
+                        if os.path.isfile(filename):
+                            targetdir = f'{key}/{tile}/{year}/{month}/{day}'
+                            print('Moving {} to S3 object storage bucket: {}'.format(filename, S3tilebucket))
+                            S3.copyfilestobucket(filename = filename, bucket = S3tilebucket, targetdir = targetdir)
+                            if remove:
+                                os.remove(filename)
+                                
+                            
+            
+        
+            
 #        if feat.GetField('BT_path') != BT_ITM:
 #            feat.SetField('BT_path', BT_ITM)
 
@@ -1632,7 +1840,7 @@ def importespatotiles(f, *args, **kwargs):
             year, month, day = datetuple.year, datetuple.month, datetuple.day
             targetdir = f'{S3tarfilepath}/{year}/{month:0d}/{day:0d}'
             print('Moving {} to S3 object storage bucket: {}'.format(basename, S3tarfilebucket))
-            copyfilestobucket(filename = f, bucket = S3tarfilebucket, targetdir = targetdir)
+            S3.copyfilestobucket(filename = f, bucket = S3tarfilebucket, targetdir = targetdir)
             os.remove(f)
         else: # archive to archdir
             larchdir = os.path.join(archdir, 'landsat')
@@ -1667,26 +1875,33 @@ def ESPAreprocess(SceneID, listfile):
 ## Sentinel-2 specific functions
 
 S2dict = {'driver' : 'SENTINEL2',
-          '10m' : ['2', '3', '4', '8'],
+          '10m' : ['4', '3', '2', '8'],
           '20m' : ['5', '6', '7', '8a', '11', '12'],
           '60m' : ['1', '9'],
           'qbands' :['AOT', 'CLD', 'SCL', 'SNW', 'WVP'],
           'alt' : ['08a'],
           }    
 
-def WarpMGRS(dirname, *args, **kwargs):
+def WarpMGRS(dirname, datasettype, *args, **kwargs):
     # This function imports new ESPA-process LEDAPS data
     # Version 1.5: Landsat Collection 2 Level 2 data now supported, AWS S3 
     #              object storage
     # os.chdir(dirname)
     basename = os.path.basename(dirname)
     ProductID = basename
-    print(f'Now processing scene: {ProductID}')
+    print(f'Now processing scene: {ProductID} to type {datasettype}.')
     parts = basename.split('_')
     satellite = parts[0]
     datestr = parts[2][:8]
     EPSGstr = 'EPSG_326{}'.format(parts[5][1:3])
     f = os.path.join(dirname, 'MTD_MSIL2A.xml')
+    
+    if datasettype == 'Sentinel-2':
+        bandlist = ['1', '2', '3', '4', '5', '6', '7', '8', '8a', '9', '11', '12']
+    elif datasettype == 'S2OLI':
+        bandlist = ['1', '2', '3', '4', '8', '11', '12']
+    else:
+        bandlist = ['2', '3', '4', '8', '11', '12']
     
     outputdir = f'{dirname}_{projacronym}'
     projdir = os.path.join(outputdir, projacronym)
@@ -1698,18 +1913,21 @@ def WarpMGRS(dirname, *args, **kwargs):
         ds = gdal.Open(sdsname)
         for bandname in S2dict[sds]:
             
-            if bandname == '2' and sds == '10m':
+            if bandname == '4' and sds == '10m':
                 gt = ds.GetGeoTransform()
+                extent = [gt[0], gt[3], gt[0] + gt[1] * ds.RasterXSize, gt[3] + gt[5] * ds.RasterYSize]
                 xRes = gt[0]
                 yRes = -gt[4]
+                width, height = ds.RasterXSize, ds.RasterYSize
             bandnum = S2dict[sds].index(bandname) + 1
-            if sds == '10m':
-                print(f'Now extracting band {bandname}.')
-            else:
-                print(f'Now extracting band {bandname} at 10m spatial resolution.')
-            outputfile = os.path.join(outputdir, f'{ProductID}_B{bandname}.dat')
-            gdal.Translate(outputfile, ds, xRes = xRes, yRes = yRes, resampleAlg = "bilinear", bandList = [bandnum], format = 'ENVI', noData = 0)
-    bandlist = ['1', '2', '3', '4', '5', '6', '7', '8', '8a', '9', '11', '12']    
+            if bandname in bandlist:
+                if sds == '10m':
+                    print(f'Now extracting band {bandname}.')
+                else:
+                    print(f'Now extracting band {bandname} at 10m spatial resolution.')
+                outputfile = os.path.join(outputdir, f'{ProductID}_B{bandname}.dat')
+                gdal.Translate(outputfile, ds, xRes = xRes, yRes = yRes, resampleAlg = "bilinear", bandList = [bandnum], format = 'ENVI', noData = 0, width = width, height = height)
+    # bandlist = ['1', '2', '3', '4', '5', '6', '7', '8', '8a', '9', '11', '12']    
     srlist = []
     out_vrt = os.path.join(outputdir, '{}.vrt'.format(ProductID))  
     if not os.path.isfile(out_vrt):
@@ -1731,124 +1949,65 @@ def WarpMGRS(dirname, *args, **kwargs):
               dstSRS = prjstr,
               resampleAlg = 'bilinear')
     return outputfile, datestr, satellite
-   
-def importSentinel2totiles(scenelist, *args, **kwargs): 
+
+def importSentinel2totiles(scene, feature, *args, **kwargs): 
     overwrite = kwargs.get('overwrite', False)
     noupdate = kwargs.get('noupdate', False)
     tempdir = kwargs.get('tempdir', None)
     remove = kwargs.get('remove', False)
     S3tarfilepath = kwargs.get('S3tarfilepath', 'Sentinel2') # This is for archiving input files after ingestion only.
     S3tarfilepath = kwargs.get('S3tarfilebucket', 'ingested') # This is for archiving input files after ingestion only.         
-    
+    CalcVIs = kwargs.get('calcVIs', True)
+   
+    CalcNDVI = kwargs.get('CalcNDVI', True)
+    CalcEVI = kwargs.get('CalcEVI', True)
+    CalcNBR = kwargs.get('CalcNBR', True)
+    CalcNDTI = kwargs.get('CalcNDTI', True)
+    outdatasettype = kwargs.get('outdatasettype', 'Sentinel-2')
     # projection = prj.GetAttrValue('projcs')
-    tfilelist = []
-    for scene in scenelist:
-        sceneID = os.path.basename(scene)
-        print(f'Now importing scene: {sceneID} ({scenelist.index(scene) + 1}/{len(scenelist)})')
-        tfile, datestr, satellite = WarpMGRS(scene)
-        tfilelist.append(tfile)
-    if len(tfilelist) > 1:
-        tdir = os.path.join(Sen2ingestdir, datestr)
-        if not os.path.isdir(tdir):
-            os.mkdir(tdir)
-            tfilebasename = f'{satellite}_{datestr}.vrt'
-            print(f'Creating VRT from {len(tfilelist)} granules: {tfilebasename}')
-            tfile = os.path.join(tdir, tfilebasename)
-            ProductID = tfilebasename[:-4]
-            gdal.BuildVRT(tfile, tfilelist)
-    else:
-        tdir, ProductID = os.path.split(tfile)
-    
-    
+    # tfilelist = []
+    # for scene in scenelist:
+    sceneID = os.path.basename(scene)
+    print(f'Now importing scene: {sceneID}.')#' ({scenelist.index(scene) + 1}/{len(scenelist)})')
+    tfile, datestr, satellite = WarpMGRS(scene, outdatasettype)
+    # tfilelist.append(tfile)
+    # if len(tfilelist) > 1:
+    #     tdir = os.path.join(Sen2ingestdir, datestr)
+    #     if not os.path.isdir(tdir):
+    #         os.mkdir(tdir)
+    #         tfilebasename = f'{satellite}_{datestr}.vrt'
+    #         print(f'Creating VRT from {len(tfilelist)} granules: {tfilebasename}')
+    #         tfile = os.path.join(tdir, tfilebasename)
+    #         ProductID = tfilebasename[:-4]
+    #         gdal.BuildVRT(tfile, tfilelist)
+    # else:
+    tdir, ProductID = os.path.split(tfile)
+    ProductID = ProductID[:60]
         
-    # if any(x.endswith('.tif') for x in filelist):
-    #     ext = 'tif'
-    # else:
-    #     ext = 'img'
-    # xml = glob.glob(os.path.join(outputdir, '*.xml'))
-    # if len(xml) > 0:
-    #     ProductID = os.path.basename(xml[0]).replace('.xml', '') # Modified from sceneID in 1.1.1: sceneID will now be read from landsatshp
-    # elif basename[:1] == 'L' and len(basename) > 40:
-    #     ProductID = basename[:40]
-    # else:
-    #     print('No XML file found, returning.')
-    #     logerror(f, 'No XML file found.')
-    #     return
-
-    # open landsat shapefile (starting version 1.1.1)
+    feat = converttotiles(tfile, Sen2srdir, outdatasettype, pixelqa = False, \
+                          overwrite = overwrite, feature = feature, \
+                          noupdate = noupdate, ProductID = ProductID, \
+                          datestr = datestr, satellite = satellite, \
+                          CalcVIs = CalcVIs, CalcNDVI = CalcNDVI, \
+                          CalcEVI = CalcEVI, CalcNDTI = CalcNDTI, \
+                          CalcNBR = CalcNBR)
     
-    # Surface reflectance data
-    # parts = ProductID.split('_')
-    # satellite, datestr = parts[0], parts[2][:8]
-    
-    feat = converttotiles(tfile, Sen2srdir, 'Sentinel-2', pixelqa = False, overwrite = overwrite, feature = None, noupdate = noupdate, ProductID = ProductID, datestr = datestr, satellite = satellite)
-    # feat = None
-#        if feat.GetField('BT_path') != BT_ITM:
-#            feat.SetField('BT_path', BT_ITM)
-
-    # Calculate EVI and NDVI
-    # print('Processing vegetation indices.')
-    # evibasefile = '{}_EVI.dat'.format(ProductID)
-    
-    # Sen2evifile = os.path.join(tdir, evibasefile)
-    # Sen2ndvifile = os.path.join(tdir, evibasefile.replace('_EVI', '_NDVI'))
-    # if not os.path.isfile(Sen2evifile):
-        # try:
-        # calcvis(tfile, qafile = None, useqamask = False, ProductID = ProductID)
-        # feat = converttotiles(Sen2ndvifile, Sen2ndvidir, 'NDVI', pixelqa = False, feature = None, overwrite = overwrite, noupdate = noupdate, datestr = datestr, satellite = satellite, ProductID = ProductID)
-        # layer.SetFeature(feat)
-        # feat = converttotiles(Sen2evifile, Sen2evidir, 'EVI', pixelqa = False, feature = None, overwrite = overwrite, noupdate = noupdate, datestr = datestr, satellite = satellite, ProductID = ProductID)
-            # layer.SetFeature(feat)
-        # except Exception as e:
-        #     print('An error has occurred calculating VIs for scene {}:'.format(ProductID))
-        #     print(e)
-        #     logerror(tfile, e)
-#    if os.path.isfile(evifile) and feat.GetField('EVI_path') != evifile:
-#        feat.SetField('EVI_path', evifile)
-#    if os.path.isfile(ndvifile) and feat.GetField('NDVI_path') != ndvifile:
-#        feat.SetField('NDVI_path', ndvifile)
-
-    # Set feature in shapefile to preserve processed file metadata
-#     print('Updating information in shapefile.')
-# #    layer.SetFeature(feat)
-#     layer.CommitTransaction()
-#     data_source = None # Close the shapefile
-
-    # Clean up files.
-
-    # if basename.endswith('.tar.gz') or basename.endswith('.tar'): # Move input tarfile to archive location 
-    #     if useS3: # Archive to S3 object storage
-    #         year = sceneid[9:13]
-    #         targetdir = '{}/{}/{}'.format(S3tarfilebucket, S3tarfilebucket, year)
-    #         print('Moving {} to S3 object storage bucket: {}'.format(basename, targetdir))
-    #         copyfilestobucket(filename = f, bucket= S3tarfilebucket, targetdir = targetdir)
-    #         os.remove(f)
-    #     else: # archive to archdir
-    #         print('Moving {} to archive: {}'.format(basename, archdir))
-    #         if not os.access(os.path.join(archdir, os.path.basename(f)), os.F_OK):
-    #             shutil.move(f, archdir)
     if remove:
         print('Cleaning up files in directory.')
         shutil.rmtree(tdir)
-        for scene in scenelist:
-            shutil.rmtree(scene)
-        # for d in [tdir, outputdir]:
-        #     filelist = glob.glob(os.path.join(d, '*.*'))
-        #     try:
-        #         for fname in filelist:
-        #             if os.access(fname, os.F_OK):
-        #                 os.remove(fname)
-        #         os.rmdir(d)
-        #     except Exception as e:
-        #         print('An error has occurred cleaning up files for scene {}:'.format(sceneid))
-        #         print(e)
-        #         logerror(f, e)
-
+        # for scene in scenelist:
+        shutil.rmtree(scene)
+        if os.path.isdir(f'{scene}_ITM'):
+            shutil.rmtree(f'{scene}_ITM')
+       
     print('Processing complete for scene {}.'.format(ProductID))
-    if isinstance(feat, list):
-        return feat
-    else:
-        return None
+    # if isinstance(feat, list):
+    return feat
+    # else:
+    #     return None
+
+  
+    
 
 
 ## File compression/ decompression

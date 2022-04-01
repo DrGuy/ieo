@@ -19,8 +19,9 @@ try: # This is included as the module may not properly install in Anaconda.
 except:
     # ieodir = os.getenv('IEO_INSTALLDIR')
     # if not ieodir:
-    print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
-    ieodir = input('IEO installation path: ')
+    ieodir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    # print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
+    # ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
         sys.path.append(ieodir)
         import ieo
@@ -139,11 +140,13 @@ def getscenedata(layer, localscenelist):
         sensor = feature.GetField("SensorID")
         acqDateval = feature.GetField("acquisitionDate")
         try:
-            acqDate = datetime.datetime.strptime(acqDateval, '%Y/%m/%d')
+            if '/' in acqDateval:
+                acqDateval = acqDateval.replace('/', '-')
+            acqDate = datetime.datetime.strptime(acqDateval, '%Y-%m-%d %H:%M:%S')
             datestr = acqDate.strftime('%Y%j')
-        except:
-            print('Error: "acqDate" field missing acquisition date data, attempting to correct.')
-            ieo.logerror(sceneID, '"acquisitionDate" field missing acquisition date data, attempting to correct.')
+        except Exception as e:
+            print(f'Error processing acquisitionDate data, attempting to fix: {e}')
+            ieo.logerror(sceneID, e)
             datestr = sceneID[9:16]
             acqDate = datetime.datetime.strptime(datestr, '%Y%j')
 #            feature.SetField('acqDate', acqDate)
@@ -451,9 +454,15 @@ if __name__ == '__main__':
     print("API Key: " + apiKey + "\n")
     
     # type conversions of start and end dates to datetime.datetime objects
-    args.startdate = datetime.datetime.strptime(args.startdate,'%Y/%m/%d')
+    if '-' in args.startdate:
+        args.startdate = datetime.datetime.strptime(args.startdate,'%Y-%m-%d')
+    else:
+        args.startdate = datetime.datetime.strptime(args.startdate,'%Y/%m/%d')
     if args.enddate:
-        args.enddate = datetime.datetime.strptime(args.enddate,'%Y/%m/%d')
+        if '-' in args.enddate:
+            args.enddate = datetime.datetime.strptime(args.enddate,'%Y-%m-%d')
+        else:
+            args.enddate = datetime.datetime.strptime(args.enddate,'%Y/%m/%d')
     else:
         args.enddate = datetime.datetime.today()
     
@@ -531,8 +540,11 @@ if __name__ == '__main__':
         proclevels = ['L1TP', 'L1GT', 'L1GS', None]
     
     pathrowdict = {}
-    driver = ogr.GetDriverByName("GPKG")
-    dataSource = driver.Open(ieo.ieogpkg, 0)
+    if not ieo.usePostGIS:
+        driver = ogr.GetDriverByName("GPKG")
+        dataSource = driver.Open(ieo.ieogpkg, 0)
+    else:
+        dataSource = ogr.Open(ieo.ieogpkg, 0)
     layer = dataSource.GetLayer(ieo.WRS2)
     for feature in layer:
         path = feature.GetField('Path')
@@ -548,8 +560,11 @@ if __name__ == '__main__':
     print('Opening {}'.format(infile))
     if args.path and args.row:
         print('Searching for scenes from WRS-2 Path {}, Row {}, with a maximum cloud cover of {:0.1f}%.'.format(args.path, args.row, args.maxcc))
-    driver = ogr.GetDriverByName("GPKG")
-    dataSource = driver.Open(ieo.catgpkg, 0)
+    if not ieo.usePostGIS:
+        driver = ogr.GetDriverByName("GPKG")
+        dataSource = driver.Open(ieo.catgpkg, 0)
+    else:
+        dataSource = ogr.Open(ieo.catgpkg, 0)
     layer = dataSource.GetLayer(ieo.landsatshp)
     layer_defn = layer.GetLayerDefn()
     field_names = [layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())]

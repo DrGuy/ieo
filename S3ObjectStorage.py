@@ -39,9 +39,12 @@ else:
 
 # Access configuration data 
 config = configparser.ConfigParser()
-configfile = 'config/ieo.ini'
-config_location = resource_filename(Requirement.parse('ieo'), configfile)
-config.read(config_location)
+# configfile = 'config/ieo.ini'
+# config_location = resource_filename(Requirement.parse('ieo'), configfile)
+cwd = os.path.abspath(os.path.dirname(__file__))    
+print(cwd)
+configfile = os.path.join(cwd, 'config/ieo.ini')
+config.read(configfile)
 
 # parser = argparse.ArgumentParser(description = 'IEO Object Storage interface submodule.')
 # # parser.add_argument('--indir', type = str, default = None, help = 'Optional input directory in which to search for files. This is ignored if --batch=True.')
@@ -172,12 +175,13 @@ def getSentinel2scenedict(granulelist, *args, **kwargs):
     scenedict = kwargs.get('scenedict', {})
     datetuple = kwargs.get('startdate', datetime.datetime.strptime('2015-06-23', '%Y-%m-%d'))
     enddate = kwargs.get('enddate', datetime.datetime.now())
-    overridelastupdate = kwargs.get('overridelastupdate', False)
+    usebucket = kwargs.get('usebucket', None)
+    # overridelastupdate = kwargs.get('overridelastupdate', False)
     # buckets = kwargs.get('bucket', getMundibucketList('2', verbose = verbose))
-    if 'lastupdate' in scenedict.keys():
-        lastupdate = scenedict['lastupdate']
-        if not overridelastupdate:
-            datetuple = lastupdate
+    # if 'lastupdate' in scenedict.keys():
+    #     lastupdate = scenedict['lastupdate']
+    #     if not overridelastupdate:
+    #         datetuple = lastupdate
         
     if not scenedict:
         scenedict = {}
@@ -185,7 +189,9 @@ def getSentinel2scenedict(granulelist, *args, **kwargs):
     while datetuple <= enddate:
         # months = []
         # days = []
-        if datetuple.year >= sensordict['2']['qyear']:
+        if usebucket:
+            bucket = usebucket
+        elif datetuple.year >= sensordict['2']['qyear']:
             q = (datetuple.month - 1) // 3 + 1
             bucket = f's2-l2a-{datetuple.year}-q{q}'
         else:
@@ -211,36 +217,37 @@ def getSentinel2scenedict(granulelist, *args, **kwargs):
                         # if int(p1[5]) >= datetuple.day and int(p1[5]) <= enddate.day:
                         nprefix = o1.get('Prefix')
                         nresult = s3cli.list_objects(Bucket = bucket, Prefix = nprefix, Delimiter = '/')
-                        o2file = nresult.get('CommonPrefixes')[0]['Prefix']
-                        parts = o2file.split('/')
-                        ProductID = parts[6]
-                        pparts = ProductID.split('_')
-                        prodtime = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
-                        year, month, day = pparts[2][:4], pparts[2][4:6], pparts[2][6:8]
-                        if len(nresult.get('CommonPrefixes')) > 1:
-                            i = 1
-                            while i <= len(nresult.get('CommonPrefixes')): 
-                                o2file2 = nresult.get('CommonPrefixes')[i - 1]['Prefix']
-                                parts = o2file2.split('/')
-                                ProductID2 = parts[6]
-                                pparts = ProductID2.split('_')
-                                prodtime2 = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
-                                if prodtime2 > prodtime:
-                                    ProductID = ProductID2
-                                    o2file = o2file2
-                                i += 1
-                        if not bucket in scenedict.keys():
-                            scenedict[bucket] = {}
-                        if not year in scenedict[bucket].keys():
-                            scenedict[bucket][year] = {}
-                        if not month in scenedict[bucket][year].keys():
-                            scenedict[bucket][year][month] = {}
-                        if not day in scenedict[bucket][year][month].keys():
-                            scenedict[bucket][year][month][day] = {}
-                            scenedict[bucket][year][month][day]['granules'] = [] # These are data saved on the Mundi buckets
-                            scenedict[bucket][year][month][day]['tiles'] = [] # These are processed files on the local Sentinel-2 bucket
-                        print(f'Adding scene to processing list: {ProductID}')
-                        scenedict[bucket][year][month][day]['granules'].append(o2file)
+                        for item in nresult.get('CommonPrefixes'):
+                            o2file = item['Prefix']
+                            parts = o2file.split('/')
+                            ProductID = parts[6]
+                            pparts = ProductID.split('_')
+                            # prodtime = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
+                            year, month, day = pparts[2][:4], pparts[2][4:6], pparts[2][6:8]
+                            # if len(nresult.get('CommonPrefixes')) > 1:
+                            #     i = 1
+                            #     while i <= len(nresult.get('CommonPrefixes')): 
+                            #         o2file2 = nresult.get('CommonPrefixes')[i - 1]['Prefix']
+                            #         parts = o2file2.split('/')
+                            #         ProductID2 = parts[6]
+                            #         pparts = ProductID2.split('_')
+                            #         prodtime2 = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
+                            #         if prodtime2 > prodtime:
+                            #             ProductID = ProductID2
+                            #             o2file = o2file2
+                            #         i += 1
+                            if not bucket in scenedict.keys():
+                                scenedict[bucket] = {}
+                            if not year in scenedict[bucket].keys():
+                                scenedict[bucket][year] = {}
+                            if not month in scenedict[bucket][year].keys():
+                                scenedict[bucket][year][month] = {}
+                            if not day in scenedict[bucket][year][month].keys():
+                                scenedict[bucket][year][month][day] = {}
+                                scenedict[bucket][year][month][day]['granules'] = [] # These are data saved on the Mundi buckets
+                                scenedict[bucket][year][month][day]['tiles'] = [] # These are processed files on the local Sentinel-2 bucket
+                            print(f'Adding scene to processing list: {ProductID}')
+                            scenedict[bucket][year][month][day]['granules'].append(o2file)
         if q == 4:
             year = datetuple.year + 1
             month = 1
@@ -249,36 +256,39 @@ def getSentinel2scenedict(granulelist, *args, **kwargs):
             year = datetuple.year
         day = 1
         datetuple = datetime.datetime.strptime(f'{year}-{month}-{day}', '%Y-%m-%d')
-    scenedict['lastupdate'] = datetime.datetime.today()  
+    # scenedict['lastupdate'] = datetime.datetime.today()  
     return scenedict
                 
-        
-    # for bucket in buckets:
-    #     print(f'Now searching bucket {bucket} for scenes from MGRS tile {tile}.')
-    #     scenedict[bucket] = {}
-    #     if not 'q' in bucket:
-    #         year = bucket[-4:]
-    #         month = 1
-    #         endmonth = 12
-    #     else:
-    #         year = bucket[-7 : -3]
-    #         q = str(bucket[-1:])
-    #         endmonth = q * 3
-    #         month = endmonth - 2
-    #     while month <= endmonth:
-    #         print(f'Searching in month: {month}')
-    #         day = 1
-    #         while day <= 31:
-    #             prefix = '{}/{}/{}/{}/{:02d}/{:02d}'.format(tile[:2], tile[2 : 3], tile[3:], year, month, day)
-    #             d = getbucketobjects(bucket, prefix)
-    #             if isinstance(d, dict):
-    #                 if len(d[prefix]) > 0:
-    #                     for item in d[prefix]:
-    #                         print(f'Adding scene {item} from date {year}/{month:02d}/{day:02d}.')
-    #                         scenedict[bucket].append(f'{prefix}/{item}')
-    #             day += 1
-    #         month += 1
-    # return scenedict
+def getSentinel2scenedictFromFlatBucket(granulelist, bucket, *args, **kwargs):
+    # verbose = kwargs.get('verbose', False)
+    scenedict = kwargs.get('scenedict', {})
+    startdate = kwargs.get('startdate', datetime.datetime.strptime('2015-06-23', '%Y-%m-%d'))
+    enddate = kwargs.get('enddate', datetime.datetime.now())
+    flist = getFileList(bucket)
+    if not scenedict:
+        scenedict = {}
+    for f in flist:
+        ProductID = f[:60]
+        pparts = ProductID.split('_')
+        datetuple = datetime.datetime.strptime(pparts[2][:8], '%Y%m%d')
+        tile = pparts[5][1:]
+        if (tile in granulelist) and (datetuple >= startdate) and (datetuple <= enddate):
+        # prodtime = datetime.datetime.strptime(pparts[6], '%Y%m%dT%H%M%S')
+            year, month, day = pparts[2][:4], pparts[2][4:6], pparts[2][6:8]
+            if not bucket in scenedict.keys():
+                scenedict[bucket] = {}
+            if not year in scenedict[bucket].keys():
+                scenedict[bucket][year] = {}
+            if not month in scenedict[bucket][year].keys():
+                scenedict[bucket][year][month] = {}
+            if not day in scenedict[bucket][year][month].keys():
+                scenedict[bucket][year][month][day] = {}
+                scenedict[bucket][year][month][day]['granules'] = [] # These are data saved on the Mundi buckets
+                scenedict[bucket][year][month][day]['tiles'] = [] # These are processed files on the local Sentinel-2 bucket
+            print(f'Adding scene to processing list: {ProductID}')
+            scenedict[bucket][year][month][day]['granules'].append(f)
+      
+    return scenedict
 
 def readcredentials():
     credentials = {}
@@ -352,6 +362,8 @@ def download_s3_folder(bucket_name, s3_folder, local_dir):
     for obj in bucket.objects.filter(Prefix = s3_folder):
         target = obj.key if local_dir is None \
             else os.path.join(local_dir, os.path.relpath(obj.key, s3_folder))
+        if target.endswith('..'):
+            target = target[:-3]
         if not os.path.exists(os.path.dirname(target)):
             os.makedirs(os.path.dirname(target))
         if obj.key[-1] == '/':
@@ -379,7 +391,7 @@ def copyfilestobucket(*args, **kwargs):
                 flist.append(os.path.join(root, name))
     elif filelist:
         try:
-            if (len(filelist == 0)) or (not isinstance(filelist, 'list')):
+            if (len(filelist) == 0) or (not isinstance(filelist, list)):
                 print('ERROR: "filelist" keyword used, but either has zero items or is not a list object. Exiting.')
                 sys.exit()
         except Exception as e:
@@ -451,6 +463,20 @@ def getFileList(bucket, *args, **kwargs):
         for obj in objs:
             filelist.append(obj.key)
     return filelist
+
+def getbucketfoldercontents(bucket, prefix, delimiter, *args, **kwargs):
+    outlist = []
+    obs =  s3cli.list_objects(Bucket = bucket, Prefix = prefix, Delimiter = delimiter)
+    if 'CommonPrefixes' in obs.keys():
+        for p in obs['CommonPrefixes']:
+            ps = p['Prefix']
+            if ps.endswith('/'): 
+                ps = ps[:-1]
+            outlist.append(ps.split('/')[-1])
+    if 'Contents' in obs.keys():
+        for p in obs['Contents']:
+            outlist.append(p['Key'])
+    return outlist
 
 def getbucketobjects(bucket, prefix):
     # code borrowed from 

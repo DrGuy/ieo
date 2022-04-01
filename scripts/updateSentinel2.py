@@ -7,7 +7,8 @@
 # 
 # version 1.5
 # 
-# This script will create and update a geopackage layer of all available Landsat TM/ETM+/OLI-TIRS scenes, including available metadata
+# This script will create and update a geopackage layer of all available Sentinel-2 scenes, including available metadata
+# Modified from updatelandsat.py
 # 
 # Changes:
 #     
@@ -18,6 +19,7 @@
 # 23 April 2021: Refactored as version 2.0 by Sean O'Riogain
 # 07 May 2021: Version 2.1: Sean O'Riogain modified version 2.0 to use API v1.5, improve progress updates, and validate arguments in main() 
 # 06 July 2021: Reversioned to 1.5. Added query logging to readUSGS()
+# 02 November 2021: updateSentinel2.py created from updatelandsat.py code
 # =============================================================================
 
 # =============================================================================
@@ -25,6 +27,8 @@
 # =============================================================================
 
 import argparse, datetime, getpass, json, math, os, requests, shutil, sys
+
+import xml.etree.ElementTree as et
 
 from osgeo import ogr, osr
 
@@ -44,7 +48,7 @@ except:
     # ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
         sys.path.append(ieodir)
-        import ieo
+        import ieo, S3ObjectStorage
     else:
         print('Error: that is not a valid path for the IEO module. Exiting.')
         sys.exit()
@@ -92,6 +96,139 @@ def dlthumb(dlurl, jpg):
         file.write(r.content)
 
     return
+
+def scanMTDfile(f, *args, **kwargs):
+    # featuredict = kwargs.get('featuredict', {})
+    verbose = kwargs.get('verbose', False)
+    if verbose: print(f'Now parsing file: {f}')
+    fieldlist = ['PRODUCT_START_TIME', 'PRODUCT_STOP_TIME', 'PRODUCT_URI', 'PRODUCT_URI_2A', 'PROCESSING_LEVEL', 'PRODUCT_TYPE', 'PROCESSING_BASELINE', 'GENERATION_TIME', 'PREVIEW_IMAGE_URL', 'PREVIEW_GEO_INFO', 'SPACECRAFT_NAME', 'DATATAKE_TYPE', 'DATATAKE_SENSING_START', 'SENSING_ORBIT_NUMBER', 'SENSING_ORBIT_DIRECTION', 'PRODUCT_FORMAT', 'RASTER_CS_TYPE', 'PIXEL_ORIGIN', 'GEO_TABLES', 'HORIZONTAL_CS_TYPE', 'SNOW_CLIMATOLOGY_MAP', 'ESACCI_WaterBodies_Map', 'ESACCI_LandCover_Map', 'ESACCI_SnowCondition_Map_Dir', 'Cloud_Coverage_Assessment', 'DEGRADED_ANC_DATA_PERCENTAGE', 'DEGRADED_MSI_DATA_PERCENTAGE', 'NODATA_PIXEL_PERCENTAGE', 'SATURATED_DEFECTIVE_PIXEL_PERCENTAGE', 'DARK_FEATURES_PERCENTAGE', 'CLOUD_SHADOW_PERCENTAGE', 'VEGETATION_PERCENTAGE', 'NOT_VEGETATED_PERCENTAGE', 'WATER_PERCENTAGE', 'UNCLASSIFIED_PERCENTAGE', 'MEDIUM_PROBA_CLOUDS_PERCENTAGE', 'HIGH_PROBA_CLOUDS_PERCENTAGE', 'THIN_CIRRUS_PERCENTAGE', 'SNOW_ICE_PERCENTAGE', 'RADIATIVE_TRANSFER_ACCURACY', 'WATER_VAPOUR_RETRIEVAL_ACCURACY', 'AOT_RETRIEVAL_ACCURACY']
+    intlist = ['SENSING_ORBIT_NUMBER', 'ORBIT_NUMBER']
+    floatlist = ['Cloud_Coverage_Assessment', 'DEGRADED_ANC_DATA_PERCENTAGE', 'DEGRADED_MSI_DATA_PERCENTAGE', 'NODATA_PIXEL_PERCENTAGE', 'SATURATED_DEFECTIVE_PIXEL_PERCENTAGE', 'DARK_FEATURES_PERCENTAGE', 'CLOUD_SHADOW_PERCENTAGE', 'VEGETATION_PERCENTAGE', 'NOT_VEGETATED_PERCENTAGE', 'WATER_PERCENTAGE', 'UNCLASSIFIED_PERCENTAGE', 'MEDIUM_PROBA_CLOUDS_PERCENTAGE', 'HIGH_PROBA_CLOUDS_PERCENTAGE', 'THIN_CIRRUS_PERCENTAGE', 'SNOW_ICE_PERCENTAGE', 'RADIATIVE_TRANSFER_ACCURACY', 'WATER_VAPOUR_RETRIEVAL_ACCURACY', 'AOT_RETRIEVAL_ACCURACY']
+    tree = et.parse(f)
+    root = tree.getroot()
+    
+    featuredict = walk_tree_recursive(root, fieldlist, intlist, floatlist)
+    return featuredict
+
+
+def walk_tree_recursive(root, fieldlist, intlist, floatlist, *args, **kwargs):
+    # code modified from https://stackoverflow.com/questions/28194703/recursive-xml-parsing-python-using-elementtree
+    coordfieldname = kwargs.get('coordfieldname', 'EXT_POS_LIST')
+    outdict = kwargs.get('outdict', {})
+    #do whatever with .tags here
+    for child in root:
+        outdict = walk_tree_recursive(child, fieldlist, intlist, floatlist, outdict = outdict)
+        if child.tag in fieldlist:
+            if child.tag in intlist:
+                outdict[child.tag] = int(child.text)
+            elif child.tag in floatlist:
+                outdict[child.tag] = float(child.text)
+            else:
+                outdict[child.tag] = child.text
+        elif child.tag == coordfieldname:
+            coords = []
+            s = child.text.split()
+            numcoords = int(len(s) / 2)
+            for i in range(numcoords):
+                coords.append([float(s[i * 2]), float(s[i * 2 + 1])])
+            outdict['coords'] = coords
+    return outdict
+
+
+def makeS2feature(f, *args, **kwargs):
+    source = osr.SpatialReference() # Lat/Lon WGS-64
+    source.ImportFromEPSG(4326)
+    transform = osr.CoordinateTransformation(source, ieo.prj) 
+    ring = ogr.Geometry(ogr.wkbLinearRing)
+    featuredict = scanMTDfile(f)
+    for coord in featuredict['coords']:
+        ring.AddPoint(coord[0], coord[1])
+    # Create polygon
+    poly = ogr.Geometry(ogr.wkbPolygon)
+    poly.AddGeometry(ring)
+    featuredict['WKT'] = poly.ExportToWkt()
+    poly.Transform(transform)
+    featuredict['poly'] =  poly
+    return featuredict
+     
+def makeS2polygon(f, *args, **kwargs):
+    source = osr.SpatialReference() # Lat/Lon WGS-64
+    source.ImportFromEPSG(4326)
+    transform = osr.CoordinateTransformation(source, ieo.prj) 
+    ring = ogr.Geometry(ogr.wkbLinearRing)
+    featuredict = scanMTDfile(f)
+    if verbose_g: print(f'Total points for polygon: {len(featuredict["coords"])}')
+    for coord in featuredict['coords']:
+        ring.AddPoint(coord[0], coord[1])
+    # Create polygon
+    poly = ogr.Geometry(ogr.wkbPolygon)
+    poly.AddGeometry(ring)
+    featuredict['WKT'] = poly.ExportToWkt()
+    poly.Transform(transform)
+    # featuredict['poly'] =  poly
+    produri = 'PRODUCT_URI_2A'
+    for tag in ['PRODUCT_URI_2A', 'PRODUCT_URI']:
+        if tag in featuredict.keys():
+            produri = tag
+            break
+    featuredict['ProductID'] = featuredict[produri][:-5]
+    if len(featuredict['ProductID']) > 60:
+        featuredict['ProductID'] = featuredict['ProductID'][:60]
+    if verbose_g: print(f'ProductID: {len(featuredict["ProductID"])}')
+    parts = featuredict['ProductID'].split('_')
+    featuredict['acquisitionDate'] = datetime.datetime.strptime(parts[2], '%Y%m%dT%H%M%S')
+    featuredict['sceneID'] = f'{parts[0]}{parts[5]}{featuredict["acquisitionDate"].strftime("%Y%j")}ESA00' # Creates a fake USGS-like Scene Identifier
+    featuredict['MGRS'] = parts[5][1:]
+    if verbose_g: print(f'sceneID: {len(featuredict["sceneID"])}')
+    return featuredict, poly
+     
+def Sen2updateIEO(f, layer, bucket, bucketpath, *args, **kwargs):
+    if verbose_g: print('Parsing XML data and creating polygon.')
+    featuredict, poly = makeS2polygon(f)
+    if verbose_g: print('Creating feature in layer.')
+    feature = ogr.Feature(layer.GetLayerDefn())
+    
+    # Add field attributes
+    if verbose_g: print('Setting field attributes.')
+    for fieldname in featuredict.keys():
+        if not fieldname in ['poly', 'coords']:
+            if fieldname.endswith('Date') or fieldname.endswith('TIME') or fieldname == 'DATATAKE_SENSING_START':
+                if isinstance(featuredict[fieldname], str):
+                    if '.' in featuredict[fieldname]:
+                        formatstr = '%Y-%m-%dT%H:%M:%S.%fZ'
+                    else:
+                        formatstr = '%Y-%m-%dT%H:%M:%SZ'
+                    featuredict[fieldname] = datetime.datetime.strptime(featuredict[fieldname], formatstr)
+                feature.SetField(fieldname, featuredict[fieldname].strftime('%Y-%m-%d %H:%M:%S')) #\
+                                             # featuredict[fieldname].year, \
+                                             # featuredict[fieldname].month, \
+                                             # featuredict[fieldname].day, \
+                                             # featuredict[fieldname].hour, \
+                                             # featuredict[fieldname].minute, \
+                                             # featuredict[fieldname], 100)
+            else:
+                feature.SetField(fieldname, featuredict[fieldname])
+    
+    feature.SetField('S3_endpoint_URL',  S3ObjectStorage.url)
+    feature.SetField('S3_ingest_bucket', bucket)
+    feature.SetField('S3_endpoint_path', bucketpath)
+    now = datetime.datetime.now()
+    feature.SetField('Metadata_Ingest_Time', now.strftime('%Y-%m-%d %H:%M:%S')) #now.year, \
+                                             # now.month, \
+                                             # now.day, \
+                                             # now.hour, \
+                                             # now.minute, \
+                                             # now.second, 100)
+    feature.SetGeometry(poly)
+            
+    # Create the new feature
+    layer.CreateFeature(feature)
+    if verbose_g: print('Feature created.')
+    # Free the new features' resources 
+    feature.Destroy()    
+    
+    return layer
+
 
 # =============================================================================
 # Create the Minimum Bounding Rectangle (MBR) for JSON queries
@@ -255,7 +392,7 @@ def getThumbnails(layer, updatemissing, badgeom):
         if created:
             sceneCount += 1
 
-    print('\rCreated thumbnail and/or world files for {} of {} scenes.                                       \n'\
+    print('\rCreated thumbnail and/or world files for {} of {} scenes.\n'\
           .format(sceneCount, featureCount))
 
     return
@@ -350,192 +487,116 @@ def openIEO():
         data_source = ogr.Open(ieo.catgpkg, 1)   
 
     # Set up the defintions of the main geopackage fields (attributes)
+    fieldlist = ['PRODUCT_START_TIME', 'PRODUCT_STOP_TIME', 'PRODUCT_URI', 'PROCESSING_LEVEL', 'PRODUCT_TYPE', 'PROCESSING_BASELINE', 'GENERATION_TIME', 'PREVIEW_IMAGE_URL', 'PREVIEW_GEO_INFO', 'SPACECRAFT_NAME', 'DATATAKE_TYPE', 'DATATAKE_SENSING_START', 'SENSING_ORBIT_NUMBER', 'SENSING_ORBIT_DIRECTION', 'PRODUCT_FORMAT', 'RASTER_CS_TYPE', 'PIXEL_ORIGIN', 'GEO_TABLES', 'HORIZONTAL_CS_TYPE', 'SNOW_CLIMATOLOGY_MAP', 'ESACCI_WaterBodies_Map', 'ESACCI_LandCover_Map', 'ESACCI_SnowCondition_Map_Dir', 'Cloud_Coverage_Assessment', 'DEGRADED_ANC_DATA_PERCENTAGE', 'DEGRADED_MSI_DATA_PERCENTAGE', 'NODATA_PIXEL_PERCENTAGE', 'SATURATED_DEFECTIVE_PIXEL_PERCENTAGE', 'DARK_FEATURES_PERCENTAGE', 'CLOUD_SHADOW_PERCENTAGE', 'VEGETATION_PERCENTAGE', 'NOT_VEGETATED_PERCENTAGE', 'WATER_PERCENTAGE', 'UNCLASSIFIED_PERCENTAGE', 'MEDIUM_PROBA_CLOUDS_PERCENTAGE', 'HIGH_PROBA_CLOUDS_PERCENTAGE', 'THIN_CIRRUS_PERCENTAGE', 'SNOW_ICE_PERCENTAGE', 'RADIATIVE_TRANSFER_ACCURACY', 'WATER_VAPOUR_RETRIEVAL_ACCURACY', 'AOT_RETRIEVAL_ACCURACY']
+    intlist = ['SENSING_ORBIT_NUMBER', 'ORBIT_NUMBER']
+    floatlist = ['Cloud_Coverage_Assessment', 'DEGRADED_ANC_DATA_PERCENTAGE', 'DEGRADED_MSI_DATA_PERCENTAGE', 'NODATA_PIXEL_PERCENTAGE', 'SATURATED_DEFECTIVE_PIXEL_PERCENTAGE', 'DARK_FEATURES_PERCENTAGE', 'CLOUD_SHADOW_PERCENTAGE', 'VEGETATION_PERCENTAGE', 'NOT_VEGETATED_PERCENTAGE', 'WATER_PERCENTAGE', 'UNCLASSIFIED_PERCENTAGE', 'MEDIUM_PROBA_CLOUDS_PERCENTAGE', 'HIGH_PROBA_CLOUDS_PERCENTAGE', 'THIN_CIRRUS_PERCENTAGE', 'SNOW_ICE_PERCENTAGE', 'RADIATIVE_TRANSFER_ACCURACY', 'WATER_VAPOUR_RETRIEVAL_ACCURACY', 'AOT_RETRIEVAL_ACCURACY']
+    
     fieldvaluelist = [
-        ['LandsatPID', 'LANDSAT_PRODUCT_ID_L2', 'Landsat Product Identifier L2', ogr.OFTString, 40],
-        ['LandsatPIDL1', 'LANDSAT_PRODUCT_ID_L1', 'Landsat Product Identifier L1', ogr.OFTString, 40],
-        ['sceneID', 'sceneID', 'Landsat Scene Identifier', ogr.OFTString, 21],
-        ['SensorID', 'SensorID', 'Sensor Identifier', ogr.OFTString, 0],
-        ['SatNumber', 'Satellite', 'Satellite', ogr.OFTString, 0],
-        ['acqDate', 'acquisitionDate', 'Date Acquired', ogr.OFTDateTime, 0],
-        ['Updated', 'dateUpdated', 'Date Product Generated L2', ogr.OFTDateTime, 0],
-        ['path', 'path', 'WRS Path', ogr.OFTInteger, 0],
-        ['row', 'row', 'WRS Row', ogr.OFTInteger, 0],
-        ['CenterLat', 'sceneCenterLatitude', 'Scene Center Latitude', ogr.OFTReal, 0],
-        ['CenterLong', 'sceneCenterLongitude', 'Scene Center Longitude', ogr.OFTReal, 0],
-        ['CC', 'cloudCover', 'Cloud Cover Truncated', ogr.OFTInteger, 0],
-        ['CCFull', 'cloudCoverFull', 'Scene Cloud Cover L1', ogr.OFTReal, 0],
-        ['CCLand', 'CLOUD_COVER_LAND', 'Land Cloud Cover', ogr.OFTReal, 0],
-        ['UL_Q_CCA', 'FULL_UL_QUAD_CCA', 'Cloud Cover Quadrant Upper Left', ogr.OFTReal, 0],
-        ['UR_Q_CCA', 'FULL_UR_QUAD_CCA', 'Cloud Cover Quadrant Upper Right', ogr.OFTReal, 0],
-        ['LL_Q_CCA', 'FULL_LL_QUAD_CCA', 'Cloud Cover Quadrant Lower Left', ogr.OFTReal, 0],
-        ['LR_Q_CCA', 'FULL_LR_QUAD_CCA', 'Cloud Cover Quadrant Lower Right', ogr.OFTReal, 0],
-        ['DT_L2', 'DATA_TYPE_L2', 'Data Type L2', ogr.OFTString, 0],
-        ['DT_L1', 'DATA_TYPE_L1', 'Data Type Level-1', ogr.OFTString, 0],
-        ['DT_L0RP', 'DATA_TYPE_L0RP', 'Data Type Level 0Rp', ogr.OFTString, 0],
-        ['L1_AVAIL', 'L1_AVAILABLE', 'L1 Available', ogr.OFTString, 0],
-        ['IMAGE_QUAL', 'IMAGE_QUALITY', 'Image Quality', ogr.OFTString, 0],
-        ['dayOrNight', 'dayOrNight', 'Day/Night Indicator', ogr.OFTString, 0],
-        ['sunEl', 'sunElevation_L1', 'Sun Elevation L1', ogr.OFTReal, 0],
-        ['sunAz', 'sunAzimuth_L1', 'Sun Azimuth L1', ogr.OFTReal, 0],
-        ['sunElL0RA', 'sunElevation_L0RA', 'Sun Elevation L1', ogr.OFTReal, 0],
-        ['sunAzL0RA', 'sunAzimuth_L0RA', 'Sun Azimuth L1', ogr.OFTReal, 0],
-        ['StartTime', 'sceneStartTime', 'Start Time', ogr.OFTDateTime, 0],
-        ['StopTime', 'sceneStopTime', 'Stop Time', ogr.OFTDateTime, 0],
-        ['UTM_ZONE', 'UTM_ZONE', 'UTM Zone', ogr.OFTInteger, 0],
-        ['DATUM', 'DATUM', 'Datum', ogr.OFTString, 0],
-        ['ELEVSOURCE', 'ELEVATION_SOURCE', 'Elevation Source', ogr.OFTString, 0],
-        ['ELLIPSOID', 'ELLIPSOID', 'Ellipsoid', ogr.OFTString, 0],
-        ['PROJ_L1', 'MAP_PROJECTION_L1', 'Product Map Projection L1', ogr.OFTString, 0],
-        ['PROJ_L2', 'MAP_PROJECTION_L2', 'Product Map Projection L2', ogr.OFTString, 0],
-        ['PROJ_L0RA', 'MAP_PROJECTION_L0RA', 'Map Projection L0Ra', ogr.OFTString, 0],
-        ['ORIENT', 'ORIENTATION', 'Orientation', ogr.OFTString, 0],
-        ['EPHEM_TYPE', 'EPHEMERIS_TYPE', 'Ephemeris Type', ogr.OFTString, 0],
-        ['CPS_MODEL', 'GROUND_CONTROL_POINTS_MODEL', 'Ground Control Points Model', ogr.OFTInteger, 0],
-        ['GCPSVERIFY', 'GROUND_CONTROL_POINTS_VERIFY', 'Ground Control Points Version', ogr.OFTInteger, 0],
-        ['RMSE_MODEL', 'GEOMETRIC_RMSE_MODEL', 'Geometric RMSE Model', ogr.OFTReal, 0],
-        ['RMSE_X', 'GEOMETRIC_RMSE_MODEL_X', 'Geometric RMSE Model X', ogr.OFTReal, 0],
-        ['RMSE_Y', 'GEOMETRIC_RMSE_MODEL_Y', 'Geometric RMSE Model Y', ogr.OFTReal, 0],
-        ['RMSEVERIFY', 'GEOMETRIC_RMSE_VERIFY', 'Geometric RMSE Verify', ogr.OFTReal, 0],
-        ['FORMAT', 'OUTPUT_FORMAT', 'Output Format', ogr.OFTString, 0],
-        ['RESAMP_OPT', 'RESAMPLING_OPTION', 'Resampling Option', ogr.OFTString, 0],
-        ['LINES', 'REFLECTIVE_LINES', 'Reflective Lines', ogr.OFTInteger, 0],
-        ['SAMPLES', 'REFLECTIVE_SAMPLES', 'Reflective Samples', ogr.OFTInteger, 0],
-        ['TH_LINES', 'THERMAL_LINES', 'Thermal Lines', ogr.OFTInteger, 0],
-        ['TH_SAMPLES', 'THERMAL_SAMPLES', 'Thermal Samples', ogr.OFTInteger, 0],
-        ['PAN_LINES', 'PANCHROMATIC_LINES', 'Panchromatic Lines', ogr.OFTInteger, 0],
-        ['PANSAMPLES', 'PANCHROMATIC_SAMPLES', 'Panchromatic Samples', ogr.OFTInteger, 0],
-        ['GC_SIZE_R', 'GRID_CELL_SIZE_REFLECTIVE', 'Grid Cell Size Reflective', ogr.OFTInteger, 0],
-        ['GC_SIZE_TH', 'GRID_CELL_SIZE_THERMAL', 'Grid Cell Size Thermal', ogr.OFTInteger, 0],
-        ['GCSIZE_PAN', 'GRID_CELL_SIZE_PANCHROMATIC', 'Grid Cell Size Panchromatic', ogr.OFTInteger, 0],
-        ['PROCSOFTVE', 'PROCESSING_SOFTWARE_VERSION', 'Processing Software Version', ogr.OFTString, 0],
-        ['CPF_NAME', 'CPF_NAME', 'Calibration Parameter File', ogr.OFTString, 0],
-        ['DATEL1_GEN', 'DATE_L1_GENERATED', 'Date L-1 Generated', ogr.OFTString, 0],
-        ['GCP_Ver', 'GROUND_CONTROL_POINTS_VERSION', 'Ground Control Points Version', ogr.OFTInteger, 0],
-        ['DatasetID', 'DatasetID', 'Dataset Identifier', ogr.OFTString, 0],
-        ['CollectCat', 'COLLECTION_CATEGORY', 'Collection Category', ogr.OFTString, 0],
-        ['CollectNum', 'COLLECTION_NUMBER', 'Collection Number', ogr.OFTString, 0],
-        ['flightPath', 'flightPath', 'flightPath', ogr.OFTString, 0],
-        ['RecStation', 'receivingStation', 'Station Identifier', ogr.OFTString, 0],
-        ['imageQual1', 'imageQuality1', 'Image Quality 1', ogr.OFTString, 0],
-        ['imageQual2', 'imageQuality2', 'Image Quality 2', ogr.OFTString, 0],
-        ['gainBand1', 'gainBand1', 'Gain Band 1', ogr.OFTString, 0],
-        ['gainBand2', 'gainBand2', 'Gain Band 2', ogr.OFTString, 0],
-        ['gainBand3', 'gainBand3', 'Gain Band 3', ogr.OFTString, 0],
-        ['gainBand4', 'gainBand4', 'Gain Band 4', ogr.OFTString, 0],
-        ['gainBand5', 'gainBand5', 'Gain Band 5', ogr.OFTString, 0],
-        ['gainBand6H', 'gainBand6H', 'Gain Band 6H', ogr.OFTString, 0],
-        ['gainBand6L', 'gainBand6L', 'Gain Band 6L', ogr.OFTString, 0],
-        ['gainBand7', 'gainBand7', 'Gain Band 7', ogr.OFTString, 0],
-        ['gainBand8', 'gainBand8', 'Gain Band 8', ogr.OFTString, 0],
-        ['GainChange', 'GainChange', 'Gain Change', ogr.OFTString, 0],
-        ['GCBand1', 'gainChangeBand1', 'Gain Change Band 1', ogr.OFTString, 0],
-        ['GCBand2', 'gainChangeBand2', 'Gain Change Band 2', ogr.OFTString, 0],
-        ['GCBand3', 'gainChangeBand3', 'Gain Change Band 3', ogr.OFTString, 0],
-        ['GCBand4', 'gainChangeBand4', 'Gain Change Band 4', ogr.OFTString, 0],
-        ['GCBand5', 'gainChangeBand5', 'Gain Change Band 5', ogr.OFTString, 0],
-        ['GCBand6H', 'gainChangeBand6H', 'Gain Change Band 6H', ogr.OFTString, 0],
-        ['GCBand6L', 'gainChangeBand6L', 'Gain Change Band 6L', ogr.OFTString, 0],
-        ['GCBand7', 'gainChangeBand7', 'Gain Change Band 7', ogr.OFTString, 0],
-        ['GCBand8', 'gainChangeBand8', 'Gain Change Band 8', ogr.OFTString, 0],
-        ['SCAN_GAP_I', 'SCAN_GAP_INTERPOLATION', 'Scan Gap Interpolation', ogr.OFTReal, 0],
-        ['ROLL_ANGLE', 'ROLL_ANGLE', 'Roll Angle', ogr.OFTReal, 0],
-        ['FULL_PART', 'FULL_PARTIAL_SCENE', 'Full Partial Scene', ogr.OFTString, 0],
-        ['NADIR_OFFN', 'NADIR_OFFNADIR', 'Nadir/Off Nadir', ogr.OFTString, 0],
-        ['RLUT_FNAME', 'RLUT_FILE_NAME', 'RLUT File Name', ogr.OFTString, 0],
-        ['BPF_N_OLI', 'BPF_NAME_OLI', 'Bias Parameter File Name OLI', ogr.OFTString, 0],
-        ['BPF_N_TIRS', 'BPF_NAME_TIRS', 'Bias Parameter File Name TIRS', ogr.OFTString, 0],
-        ['TIRS_SSM', 'TIRS_SSM_MODEL', 'TIRS SSM Model', ogr.OFTString, 0],
-        ['TargetPath',  'Target_WRS_Path', 'Target WRS Path', ogr.OFTInteger, 0],
-        ['TargetRow', 'Target_WRS_Row', 'Target WRS Row', ogr.OFTInteger, 0],
-        ['DataAnom', 'data_anomaly', 'Data Anomaly', ogr.OFTString, 0],
-        ['GapPSource', 'gap_phase_source', 'Gap Phase Source', ogr.OFTString, 0],
-        ['GapPStat', 'gap_phase_statistic', 'Gap Phase Statistic', ogr.OFTReal, 0],
-        ['L7SLConoff', 'scan_line_corrector', 'Scan Line Corrector', ogr.OFTString, 0],
-        ['SensorAnom', 'sensor_anomalies', 'Sensor Anomalies', ogr.OFTString, 0],
-        ['SensorMode', 'sensor_mode', 'Sensor Mode', ogr.OFTString, 0],
-        ['browse', 'browseAvailable', 'Browse Available', ogr.OFTString, 0],
-        ['browseURL', 'browseURL', 'browseUrl', ogr.OFTString, 0],
-        ['MetadatUrl', 'metadataUrl', 'metadataUrl', ogr.OFTString, 0],
-        ['FGDCMetdat', 'fgdcMetadataUrl', 'fgdcMetadataUrl', ogr.OFTString, 0],
-        ['dataAccess', 'dataAccess', 'dataAccessUrl', ogr.OFTString, 0],
-        ['orderUrl', 'orderUrl', 'orderUrl', ogr.OFTString, 0],
-        ['DownldUrl', 'downloadUrl', 'downloadUrl', ogr.OFTString, 0],
-        ['MaskType', 'MaskType', 'MaskType', ogr.OFTString, 0],
-        ['Thumbnail_filename', 'Thumbnail_filename', 'Thumbnail_filename', ogr.OFTString, 0],
-        ['Surface_reflectance_tiles', 'Surface_reflectance_tiles', 'Surface_reflectance_tiles', ogr.OFTString, 0],
-        ['Brightness_temperature_tiles', 'Brightness_temperature_tiles', 'Brightness_temperature_tiles', ogr.OFTString, 0],
-        ['Surface_temperature_tiles', 'Surface_temperature_tiles', 'Surface_temperature_tiles', ogr.OFTString, 0],
-        ['Fmask_tiles', 'Fmask_tiles', 'Fmask_tiles', ogr.OFTString, 0],
-        ['Pixel_QA_tiles', 'Pixel_QA_tiles', 'Pixel_QA_tiles', ogr.OFTString, 0],
-        ['Radsat_QA_tiles', 'Radsat_QA_tiles', 'Radsat_QA_tiles', ogr.OFTString, 0],
-        ['Aerosol_QA_tiles', 'Aerosol_QA_tiles', 'Aerosol_QA_tiles', ogr.OFTString, 0],
-        ['NDVI_tiles', 'NDVI_tiles', 'NDVI_tiles', ogr.OFTString, 0],
-        ['EVI_tiles', 'EVI_tiles', 'EVI_tiles', ogr.OFTString, 0],
-        ['Tile_filename_base', 'Tile_filename_base', 'Tile_filename_base', ogr.OFTString, 0],
-        ['S3_tile_bucket', 'S3_tile_bucket', 'S3_tile_bucket', ogr.OFTString, 0],
-        ['S3_ingest_bucket', 'S3_ingest_bucket', 'S3_ingest_bucket', ogr.OFTString, 0],
-        ['S3_endpoint_URL', 'S3_endpoint_URL', 'S3_endpoint_URL', ogr.OFTString, 0],
-        ['S3_endpoint_path', 'S3_endpoint_path', 'S3_endpoint_path', ogr.OFTString, 0],
-        ['Metadata_Ingest_Time', 'Metadata_Ingest_Time', 'Metadata_Ingest_Time', ogr.OFTDateTime, 0],
-        ['Raster_Ingest_Time', 'Raster_Ingest_Time', 'Raster_Ingest_Time', ogr.OFTDateTime, 0],
+        ['ProductID', ogr.OFTString, 60],
+        ['sceneID', ogr.OFTString, 21],
+        ['acquisitionDate', ogr.OFTDateTime, 0],
+        ['MGRS', ogr.OFTString, 5],
         ]
+    for fieldname in fieldlist:
+        if fieldname in intlist:
+            pair = [fieldname, ogr.OFTInteger, 0]
+        elif fieldname in floatlist:
+            pair = [fieldname, ogr.OFTReal, 0]
+        elif fieldname.endswith('TIME') or fieldname == 'DATATAKE_SENSING_START':
+            pair = [fieldname, ogr.OFTDateTime, 0]
+        else:
+            pair = [fieldname, ogr.OFTString, 0]
+        fieldvaluelist.append(pair)
+    appendlist = [
+        ['WKT', ogr.OFTString, 0],
+        ['MaskType', ogr.OFTString, 0],
+        ['Thumbnail_filename', ogr.OFTString, 0],
+        ['S3_endpoint_URL', ogr.OFTString, 0],
+        ['S3_ingest_bucket', ogr.OFTString, 0],
+        ['S3_endpoint_path', ogr.OFTString, 0],
+        ['S3_tile_bucket', ogr.OFTString, 0],
+        ['Metadata_Ingest_Time', ogr.OFTDateTime, 0],
+        ['Raster_Ingest_Time', ogr.OFTDateTime, 0],
+        ['Surface_reflectance_tiles', ogr.OFTString, 0],
+        ['Brightness_temperature_tiles', ogr.OFTString, 0],
+        ['Surface_temperature_tiles', ogr.OFTString, 0],
+        ['Pixel_QA_tiles', ogr.OFTString, 0],
+        ['Radsat_QA_tiles', ogr.OFTString, 0],
+        ['Aerosol_QA_tiles', ogr.OFTString, 0],
+        ['NDVI_tiles', ogr.OFTString, 0],
+        ['EVI_tiles', ogr.OFTString, 0],
+        ['NDTI_tiles', ogr.OFTString, 0],
+        ['NBR_tiles', ogr.OFTString, 0],
+        ['Tile_filename_base', ogr.OFTString, 0],
+        ]
+    for item in appendlist:
+        fieldvaluelist.append(item)
 
     # Get list of field names (expected)
     fnames = []
     
     for element in fieldvaluelist:
-        fnames.append(element[1])
+        fnames.append(element[0])
 
     # Check if the geopackage contains a layer, and create it, and its fields
     #    (attributes), if it does not
+    layernames = []
     layers = data_source.GetLayerCount()
-    layerNames = []
     if layers > 0:
         for i in range(layers):
-            layerNames.append(data_source.GetLayer(i).GetName())
+            layername = data_source.GetLayer(i).GetName()
+            layernames.append(layername)
             if verbose_g:
-                print(f'Found layer: {data_source.GetLayer(i).GetName()}')
+                print(f'Found layer: {layername}')
+    else:
+        print('No layers found.')
+    
     # No layer found?
-    if not ieo.landsatshp in layerNames:
-        layer = data_source.CreateLayer(ieo.landsatshp, ieo.prj, ogr.wkbPolygon)
+    if not ieo.Sen2shp in layernames:
+        print(f'Creating layer {ieo.Sen2shp} in: {ieo.catgpkg}')
+        layer = data_source.CreateLayer(ieo.Sen2shp, ieo.prj, ogr.wkbPolygon)
         
         for element in fieldvaluelist:
-            field_name = ogr.FieldDefn(element[1], element[3])
-            if element[4] > 0:
-                field_name.SetWidth(element[4])
+            if verbose_g: print(f'Creating field {element[0]} of type {element[1]}, with width {element[2]}.')
+            field_name = ogr.FieldDefn(element[0], element[1])
+            if element[2] > 0:
+                field_name.SetWidth(element[2])
             layer.CreateField(field_name)
     
     # One layer found?
-    # elif layers == 1:
-    #     layer_name = data_source.GetLayer(0).GetName()
-        
-    #     # Check the name of the layer is that specified in the config (.ini) file
-    #     if layer_name != ieo.landsatshp:                
-    #         ieo.logerror(ieo.catgpkg, \
-    #                      'Geopackage layer name is incorrect (expected={}; actual={}).'.format(ieo.catgpkg, layer_name), \
-    #                      errorfile = errorfile)
-    #         print('Error: Geopackage layer name is incorrect (expected={}; actual={}). Exiting.'.format(ieo.catgpkg, layer_name))
-    #         sys.exit()
-    else:   # Layer name is as expected
-        layer = data_source.GetLayer(ieo.landsatshp)
- 
+    else:
+        i = layernames.index(ieo.Sen2shp)
+        layer_name = data_source.GetLayer(i).GetName()
+        if verbose_g: print(f'Opening layer: {layer_name}')
+        # Check the name of the layer is that specified in the config (.ini) file
+        # if layer_name != ieo.Sen2shp:                
+        #     ieo.logerror(ieo.catgpkg, \
+        #                  'Geopackage layer name is incorrect (expected={}; actual={}).'.format(ieo.catgpkg, layer_name), \
+        #                  errorfile = errorfile)
+        #     print('Error: Geopackage layer name is incorrect (expected={}; actual={}). Exiting.'.format(ieo.catgpkg, layer_name))
+        #     sys.exit()
+        # else:   # Layer name is as expected
+        layer = data_source.GetLayer(layer_name)
+        if verbose_g: print(f'Opened layer: {layer_name}')
         # Get list of field names (actual)  
         layerDefinition = layer.GetLayerDefn()
- 
+        if verbose_g: print(f'Getting layer definition: {layer_name}')
         shpfnames = []
-                
+        if verbose_g: print(f'Total number of fields currently in {layer_name}: {layerDefinition.GetFieldCount()}')        
         for i in range(layerDefinition.GetFieldCount()):
-            shpfnames.append(layerDefinition.GetFieldDefn(i).GetName())
+            shpfname = layerDefinition.GetFieldDefn(i).GetName()
+            if verbose_g: print(f'Found fieldname {shpfname}.')
+            shpfnames.append(shpfname)
             
         # Find missing fields and create them
-        for fname in fnames:
-            if (not fname in shpfnames) and (not fname.lower() in shpfnames):
-                if verbose_g:
-                    print(f'Creating missing field: {fname}')
-                i = fnames.index(fname)
-                field_name = ogr.FieldDefn(fnames[i], fieldvaluelist[i][3])
-                if fieldvaluelist[i][4] > 0:
-                    field_name.SetWidth(fieldvaluelist[i][4])
+        for element in fieldvaluelist:
+            if verbose_g: print(f'Analyzing field name: {element[0]}')
+            if not element[0] in shpfnames:
+                if verbose_g: print(f'Creating missing field {element[0]} of type {element[1]}, with width {element[2]}.')
+                # i = fnames.index(fname)
+                field_name = ogr.FieldDefn(element[0], element[1])
+                if element[2] > 0:
+                    field_name.SetWidth(element[2])
                 layer.CreateField(field_name)
                     
         print('Catalog opened successfully.')
@@ -800,7 +861,7 @@ def readIEO(layer):
     featureCount = layer.GetFeatureCount()
     
     if featureCount == 0:
-        print('The IEO Landsat catalog is currently empty.')
+        print('The IEO Sentinel2 catalog is currently empty.')
     else:
         layer.StartTransaction()
         
@@ -811,7 +872,7 @@ def readIEO(layer):
             
             # Check if bad feature and, if so, delete it without requesting reimport
             try:
-                sceneID = feature.GetField("sceneID")
+                ProductID = feature.GetField("ProductID")
             except:
                 exc_type, exc_obj, exc_tb = sys.exc_info()
                 fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
@@ -819,7 +880,7 @@ def readIEO(layer):
                     print(exc_type, fname, exc_tb.tb_lineno)
                     print('ERROR: bad feature, deleting.')
                 layer.DeleteFeature(feature.GetFID())
-                ieo.logerror('{}/{}'.format(ieo.catgpkg, ieo.landsatshp), '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno), errorfile = errorfile)
+                ieo.logerror('{}/{}'.format(ieo.catgpkg, ieo.Sen2shp), '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno), errorfile = errorfile)
                 feature = layer.GetNextFeature()
                 continue
             
@@ -827,18 +888,19 @@ def readIEO(layer):
             fnum += 1
             
             print('\rInspecting feature {:5d} of {}, scene {}.\r'\
-                  .format(fnum, featureCount, sceneID), end = '')
+                  .format(fnum, featureCount, ProductID), end = '')
             
             # Add scene to list
-            scenelist.append(sceneID)
+            scenelist.append(ProductID)
                         
             # Check that feature has invalid Sensor ID (proxy for invalid metadata)
             #    - and, if so, delete it and flag for reimportation
-            if not feature.GetField('SensorID') in ['TM', 'ETM', 'OLI', 'TIRS', 'OLI_TIRS']:
+            if not feature.GetField('PRODUCT_TYPE').startswith('S2MSI2A'):
                 if verbose_g:
-                    print('ERROR: missing metadata for SceneID {}. Feature will be deleted from shapefile and reimported.'.format(sceneID))
-                ieo.logerror(sceneID, 'Feature missing metadata, deleted, reimportation required.')
-                reimport.append(datetime.datetime.strptime(sceneID[9:16], '%Y%j'))
+                    print(f'PRODUCT_TYPE = {feature.GetField("PRODUCT_TYPE")}')
+                    print('ERROR: missing metadata for scene {}. Feature will be deleted from shapefile and reimported.'.format(ProductID))
+                ieo.logerror(ProductID, 'Feature missing metadata, deleted, reimportation required.')
+                reimport.append(datetime.datetime.strptime(ProductID[11:19], '%Y%m%d'))
                 layer.DeleteFeature(feature.GetFID())
                 errors['total'] += 1
                 errors['metadata'] += 1
@@ -848,14 +910,13 @@ def readIEO(layer):
                 # Check that feature has a valid Modification Date field value
                 #    - and, if not, flag the feature for updating of that field
                 try:
-                    mdate = feature.GetField('dateUpdated')
-                    if '/' in mdate:
-                        datetimestr = '%Y/%m/%d'
-                    else:
-                        datetimestr = '%Y-%m-%d'
-                    if ':' in mdate:
-                        datetimestr += ' %H:%M:%S'
-                    datetuple = datetime.datetime.strptime(mdate, datetimestr)
+                    mdate = feature.GetField('GENERATION_TIME')
+                    if isinstance(mdate, str):
+                        if '+' in mdate:
+                            datetimestr = '%Y/%m/%d %H:%M:%S+00'
+                        else:
+                            datetimestr = '%Y/%m/%d %H:%M:%S'
+                        datetuple = datetime.datetime.strptime(mdate, datetimestr)
                     if not lastupdate or datetuple > lastupdate:
                         lastupdate = datetuple
                         lastmodifiedDate = mdate
@@ -864,9 +925,11 @@ def readIEO(layer):
                         exc_type, exc_obj, exc_tb = sys.exc_info()
                         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                         print(exc_type, fname, exc_tb.tb_lineno)
-                        # print('ERROR: modifiedDate information missing for SceneID {}, adding to list.'.format(sceneID))
-                    ieo.logerror(sceneID, 'Modification date missing.', errorfile = errorfile)
-                    # updatemissing.append(sceneID)
+                        # print('ERROR: GENERATION_TIME information missing for scene {}, adding to list.'.format(ProductID))
+                        if mdate:
+                            print(mdate)
+                    ieo.logerror(ProductID, 'GENERATION_TIME missing.', errorfile = errorfile)
+                    # updatemissing.append(ProductID)
                     errors['total'] += 1
                     errors['date'] += 1
                 
@@ -877,17 +940,17 @@ def readIEO(layer):
                     env = geom.GetEnvelope()
                     if env[0] == env[1] or env[2] == env[3]:
                         if verbose_g:
-                            print('Bad geometry identified for SceneID {}, adding to the list.'.format(sceneID))
-                        ieo.logerror(sceneID, 'Bad/missing geometry.')
-                        badgeom.append(sceneID)
+                            print('Bad geometry identified for scene {}, adding to the list.'.format(ProductID))
+                        ieo.logerror(ProductID, 'Bad/missing geometry.')
+                        badgeom.append(ProductID)
                 except:
                     if verbose_g:
                         exc_type, exc_obj, exc_tb = sys.exc_info()
                         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                         print(exc_type, fname, exc_tb.tb_lineno)
-                        print('Bad geometry identified for SceneID {}, adding to the list.'.format(sceneID), errorfile = errorfile)
-                    ieo.logerror(sceneID, 'Bad/missing geometry.')
-                    badgeom.append(sceneID)
+                        print('Bad geometry identified for scene {}, adding to the list.'.format(ProductID), errorfile = errorfile)
+                    ieo.logerror(ProductID, 'Bad/missing geometry.')
+                    badgeom.append(ProductID)
                     errors['total'] += 1
                     errors['geometry'] += 1
             
@@ -902,7 +965,7 @@ def readIEO(layer):
         # Complete the transaction that was started above
         layer.CommitTransaction()
         
-        print('The IEO Landsat catalog currently contains {} valid features.'.format(len(scenelist)))
+        print('The IEO Sentinel 2 catalog currently contains {} valid features.'.format(len(scenelist)))
         
         # Display the final error counts
         if errors['total'] > 0 and (errors['total'] % 100 != 0):
@@ -1147,169 +1210,78 @@ def readUSGS(baseURL, version, headers, \
 #    update entries in the IEO catalog (geopackage layer)
 # =============================================================================
 
-def updateIEO(layer, fieldvaluelist, fnames, queryfieldnames, \
-              sceneIDs, scenedict):
-
+def updateIEO(layer, fieldvaluelist, fnames, \
+              ProductIDs, scenedict, *args, **kwargs):
+    bucketname = kwargs.get('bucket', None)
+    if bucketname:
+        import zipfile
     # This section borrowed from https://pcjericks.github.io/py-gdalogr-cookbook/projection.html
     # Lat/ Lon WGS-84 to local projection transformation
-    source = osr.SpatialReference() # Lat/Lon WGS-64
-    source.ImportFromEPSG(4326)
+    # source = osr.SpatialReference() # Lat/Lon WGS-64
+    # source.ImportFromEPSG(4326)
     
-    target = ieo.prj
+    # target = ieo.prj
     
-    transform = osr.CoordinateTransformation(source, target)    
+    # transform = osr.CoordinateTransformation(source, target)
+    proddir = os.path.join(ieo.Sen2ingestdir, 'metadata')
+    if not os.path.isdir(proddir):
+        os.makedirs(proddir)
     
     # Initialise the iteration counter for the following loop
-    filenum = 1
     
-    # Loop through the details of scenes in the scene dictionary
-    for sceneID in sceneIDs:
-        
-        # =============================================================================
-        # Processing for addition of a new layer feature (scene) begins here
-        # =============================================================================
+    for bucket in sorted(scenedict.keys()):
+   
+        print(f'Now processing scene metadata in bucket {bucket}.')
+        for year in sorted(scenedict[bucket].keys()):
+            for month in sorted(scenedict[bucket][year].keys()):
+                for day in sorted(scenedict[bucket][year][month].keys()):
+                    numfiles = len(scenedict[bucket][year][month][day]['granules'])
+                    if numfiles > 0:
+                        
+                        print(f'There are {numfiles} scenes to be processed for date {year}/{month}/{day}.')
+                        filenum = 1
+                        for f in scenedict[bucket][year][month][day]['granules']:
+                            if f.endswith('/'):
+                                f = f[:-1]
+                            ProductID = os.path.basename(f)[:60]
+                            if not ProductID in ProductIDs:
+                                # satellite = ProductID[:3]
+                                lmtdfile = os.path.join(proddir, 'MTD_MSIL2A.xml')
+                                if os.path.isfile(lmtdfile):
+                                    if verbose_g: print(f'Deleting: {lmtdfile}')
+                                    os.remove(lmtdfile)
+                                if bucketname:
+                                    zfile = os.path.join(ieo.Sen2ingestdir, f)
+                                    if not os.path.isfile(zfile):
+                                        print(f'\nDownloading {ProductID} metadata from bucket {bucket} ({filenum}/ {numfiles}).\n')
+                                        S3ObjectStorage.downloadfile(ieo.Sen2ingestdir, bucket, f)
+                                    if os.path.isfile(zfile):
+                                        print(f'Extracting metadatafile from {f} to: {lmtdfile}')
+                                        with zipfile.ZipFile(zfile, 'r') as z:
+                                            z.extract('MTD_MSIL2A.xml', proddir)
+                                    
+                                else:
+                                    mtdfile = os.path.join(f, 'MTD_MSIL2A.xml')
+                                    # lmtdfile = os.path.join(proddir, 'MTD_MSIL2A.xml')
+                                    if os.path.isfile(lmtdfile):
+                                        if verbose_g: print(f'Deleting: {lmtdfile}')
+                                        os.remove(lmtdfile)
+                                    # if verbose_g:
+                                    #     print(f)                            
+                                #        try:
+                                    # proddir = os.path.join(ieo.Sen2ingestdir, ProductID)
+                                    print(f'\nDownloading {ProductID} metadata from bucket {bucket} ({filenum}/ {numfiles}).\n')
+                                    S3ObjectStorage.downloadfile(proddir, bucket, mtdfile)
+                                if os.path.isfile(lmtdfile):
+                                    layer = Sen2updateIEO(lmtdfile, layer, bucket, f)
+                                else:
+                                    print(f'ERROR: Missing file for {ProductID}: {lmtdfile}')
+                                    ieo.logerror(ProductID, f'Missing file: {lmtdfile}')
+                                ProductIDs.append(ProductID)
+                            filenum += 1
+    
 
-        # Newly-acquired scene with coordinates?: Add to the catalog's geopackage layer
-        if not (scenedict[sceneID]['updategeom'] or scenedict[sceneID]['updatemodifiedDate']) and ('coords' in scenedict[sceneID].keys()):
-            print('\rAdding feature {} for scene number {:5d} of {}.\r'.format(sceneID, filenum, len(sceneIDs)), \
-                  end='')
-           
-            # Create the feature
-            feature = ogr.Feature(layer.GetLayerDefn())
-            
-            # Add field attributes
-            feature.SetField('sceneID', sceneID)
-                       
-            # Loop through the atributes for the current scene in the dictionary
-            for key in scenedict[sceneID].keys():
-                
-                # One of the attributes of interest and value available?
-                if (scenedict[sceneID][key]) and key in queryfieldnames:
-                    
-                    try:
-                        # Date attribute?: Add as field to feature 
-                        if fieldvaluelist[queryfieldnames.index(key)][3] == ogr.OFTDateTime:
-                            
-                            # In string format?: Convert to datetime format
-                            if isinstance(scenedict[sceneID][key], str):
-                                timestr = '%Y-%m-%d'
-                                if '/' in scenedict[sceneID][key]:
-                                    scenedict[sceneID][key] = scenedict[sceneID][key].replace('/', '-')
-                                elif scenedict[sceneID][key][4] == ':':
-                                    timestr = '%Y:%j:%H:%M:%S.%f'
-                                scenedict[sceneID][key] = datetime.datetime.strptime(scenedict[sceneID][key], timestr)
-                            
-                            feature.SetField(fnames[queryfieldnames.index(key)], \
-                                             scenedict[sceneID][key].year, \
-                                             scenedict[sceneID][key].month, \
-                                             scenedict[sceneID][key].day, \
-                                             scenedict[sceneID][key].hour, \
-                                             scenedict[sceneID][key].minute, \
-                                             scenedict[sceneID][key].second, 100)
-                        
-                        # Non-date attribute?: Add (string) as field to feature
-                        else:
-                            feature.SetField(fnames[queryfieldnames.index(key)], \
-                                             scenedict[sceneID][key])
-                   
-                    # Error detected during feature field creation? Log it 
-                    except Exception as e:
-                        if verbose_g:
-                            exc_type, exc_obj, exc_tb = sys.exc_info()
-                            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                            print(exc_type, fname, exc_tb.tb_lineno)
-                            print('Error with SceneID {}, fieldname = {}, value = {}: {}'\
-                                  .format(sceneID, \
-                                          fnames[queryfieldnames.index(key)], 
-                                          scenedict[sceneID][key], e))
-                        ieo.logerror(key, e, errorfile = errorfile)
-            
-            # Set the geometry details for the new feature
-            coords = scenedict[sceneID]['coords']
-
-            # Create ring using the current scene's coordinate data
-            ring = ogr.Geometry(ogr.wkbLinearRing)
-            
-            for coord in coords:
-                ring.AddPoint(coord[1], coord[0])
-                
-            if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
-                ring.AddPoint(coords[0][1], coords[0][0])
-            
-            # Create polygon using the ring
-            poly = ogr.Geometry(ogr.wkbPolygon)
-            poly.AddGeometry(ring)
-            poly.Transform(transform)   # Convert to local projection
-            feature.SetGeometry(poly)
-            now = datetime.datetime.now()
-            feature.SetField('Metadata_Ingest_Time', now.strftime('%Y-%m-%d %H:%M:%S'))
-            # Create the new feature
-            layer.CreateFeature(feature)
-            
-            # Free the new features' resources 
-            feature.Destroy()
-        
-        # =============================================================================
-        # Processing for update of an existing layer feature (scene) begins here
-        # =============================================================================
-        
-        else:
-            # Reposition at the first feature in the geopackage 
-            layer.ResetReading()
-            
-            # Loop through the features until the one for the current scene is reache
-            for feature in layer:
-                
-                if feature.GetField('sceneID') == sceneID:
-                    print('\rFixing feature {} for scene number {:5d} of {}.\r'.format(sceneID, filenum, len(sceneIDs)), \
-                          end='')
-                    
-                    # Geometry update required?
-                    if scenedict[sceneID]['updategeom']: 
-                        # print('Updating geometry for SceneID {}.'.format(sceneID))
-                        
-                        # Set the geometry details for the current feature
-                        coords = scenedict[sceneID]['coords']
-                        
-                        # Create ring using the current scene's coordinate data
-                        ring = ogr.Geometry(ogr.wkbLinearRing)
-                        
-                        for coord in coords:
-                            ring.AddPoint(coord[0], coord[1])
-                            
-                        if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
-                            ring.AddPoint(coord[0][0], coord[0][1])
-                    
-                        # Create polygon using the ring
-                        poly = ogr.Geometry(ogr.wkbPolygon)
-                        poly.AddGeometry(ring)
-                        poly.Transform(transform)   # Convert to local projection
-                        feature.SetGeometry(poly)
-                        
-                    # Modification date update required?   
-                    if scenedict[sceneID]['updatemodifiedDate']:
-                        # print('Updating modification date for SceneID {}.'.format(sceneID))
-                        feature.SetField('dateUpdated', 
-                                             scenedict[sceneID]['publishDate'].year, \
-                                             scenedict[sceneID]['publishDate'].month, \
-                                             scenedict[sceneID]['publishDate'].day, \
-                                             scenedict[sceneID]['publishDate'].hour, \
-                                             scenedict[sceneID]['publishDate'].minute, \
-                                             scenedict[sceneID]['publishDate'].second, 100)
-                        
-                    # Update the feature
-                    layer.SetFeature(feature)
-                    
-                    # Free the feature's resources 
-                    feature.Destroy()
-                    
-                    # Exit the update feature's for loop
-                    break
-                    
-        # Increment the loop's processsed feature counter
-        filenum += 1
-
-    return
+    return layer
 
 # =============================================================================
 # Perform basic validation on the values of selected arguments
@@ -1322,9 +1294,9 @@ def updateIEO(layer, fieldvaluelist, fnames, queryfieldnames, \
 #
 # =============================================================================
 
-def valArgs(startdate, enddate, \
-            baseURL, maxResults, \
-            thumbnails, savequeries, verbose):
+def valArgs(startdate, enddate, rescan, verbose):
+            # baseURL, maxResults, \
+            # thumbnails, savequeries
        
     # Validate start date
     try:
@@ -1352,37 +1324,44 @@ def valArgs(startdate, enddate, \
             sys.exit()
             
     # Validate Base URL
-    if urlparse(baseURL).scheme not in ('http', 'https'):
-        errMsg = 'Invalid argument value: Base URL is not valid.'
-        print(errMsg)
-        ieo.logerror(baseURL, errMsg)
-        sys.exit()    
+    # if urlparse(baseURL).scheme not in ('http', 'https'):
+    #     errMsg = 'Invalid argument value: Base URL is not valid.'
+    #     print(errMsg)
+    #     ieo.logerror(baseURL, errMsg)
+    #     sys.exit()    
 
-    # Validate Naximum Results
-    if not isinstance(maxResults, int):
-        errMsg = 'Invalid argument value: Maximum Results must be an integer value.'
-        print(errMsg)
-        ieo.logerror(maxResults, errMsg)
-        sys.exit()   
-    elif maxResults < 1:
-        errMsg = 'Invalid argument value: Maximum Results must be greater than zero.'
-        print(errMsg)
-        ieo.logerror(baseURL, errMsg)
-        sys.exit()
+    # # Validate Naximum Results
+    # if not isinstance(maxResults, int):
+    #     errMsg = 'Invalid argument value: Maximum Results must be an integer value.'
+    #     print(errMsg)
+    #     ieo.logerror(maxResults, errMsg)
+    #     sys.exit()   
+    # elif maxResults < 1:
+    #     errMsg = 'Invalid argument value: Maximum Results must be greater than zero.'
+    #     print(errMsg)
+    #     ieo.logerror(baseURL, errMsg)
+    #     sys.exit()
         
-    # Validate Thumbnails flag
-    if not isinstance(thumbnails, bool):
-        errMsg = 'Invalid argument value: Thumbnails setting must be True or False.'
-        print(errMsg)
-        ieo.logerror(thumbnails, errMsg)
-        sys.exit()          
+    # # Validate Thumbnails flag
+    # if not isinstance(thumbnails, bool):
+    #     errMsg = 'Invalid argument value: Thumbnails setting must be True or False.'
+    #     print(errMsg)
+    #     ieo.logerror(thumbnails, errMsg)
+    #     sys.exit()          
 
-    # Validate Save Queries flag
-    if not isinstance(savequeries, bool):
-        errMsg = 'Invalid argument value: Save Queries setting must be True or False.'
+    # # Validate Save Queries flag
+    # if not isinstance(savequeries, bool):
+    #     errMsg = 'Invalid argument value: Save Queries setting must be True or False.'
+    #     print(errMsg)
+    #     ieo.logerror(savequeries, errMsg)
+    #     sys.exit()   
+    
+    # Validate rescan flag
+    if not isinstance(rescan, bool):
+        errMsg = 'Invalid argument value: Rescan setting must be True or False.'
         print(errMsg)
-        ieo.logerror(savequeries, errMsg)
-        sys.exit()          
+        ieo.logerror(rescan, errMsg)
+        sys.exit()         
 
     # Validate Verbose flag
     if not isinstance(verbose, bool):
@@ -1397,19 +1376,19 @@ def valArgs(startdate, enddate, \
 # Mainline Processing
 # =============================================================================
 
-def main(username=None, password=None, catalogID='EE', version='stable', \
-         startdate='1982-07-16', enddate=None, \
-         MBR=None, baseURL='https://m2m.cr.usgs.gov/api/api/json/', \
-             maxResults=50000, thumbnails=False, savequeries=False, \
-             verbose=False):
+def main( #username=None, password=None, catalogID='EE', version='stable', \
+         startdate = '2015-06-23', enddate = None, rescan = False,\
+         # MBR=None, baseURL='https://m2m.cr.usgs.gov/api/api/json/', \
+         #     maxResults=50000, thumbnails=False, savequeries=False, \
+             verbose = False, bucket = None):
 
     # =============================================================================
     # Declare and initialise the needed global variables
     # =============================================================================
-    
+    scenedict = {}
     global errorfile, errorsfound, pathrows, verbose_g
     
-    errorfile = os.path.join(ieo.logdir, 'Landsat_inventory_download_errors.csv')
+    errorfile = os.path.join(ieo.logdir, 'Sentinel2_inventory_download_errors.csv')
     
     verbose_g = verbose
 
@@ -1419,9 +1398,9 @@ def main(username=None, password=None, catalogID='EE', version='stable', \
     
     print('\n***** Validating the argument values.....')
     
-    valArgs(startdate, enddate, \
-            baseURL, maxResults, \
-            thumbnails, savequeries, verbose)
+    valArgs(startdate, enddate, rescan, verbose)
+            # baseURL, maxResults, \
+            # thumbnails, savequeries, 
 
     # =============================================================================
     # Handle any missing arguments
@@ -1429,97 +1408,118 @@ def main(username=None, password=None, catalogID='EE', version='stable', \
     
     print('\n***** Checking some key configuration settings.....')
     
-    # USGS username or password arguments not provided?: Prompt for them now
-    if not (username and password):
-        if not username:
-            username = input('USGS/ERS username: ')
-        if not password:
-            password = getpass.getpass('USGS/ERS password: ')
+    # # USGS username or password arguments not provided?: Prompt for them now
+    # if not (username and password):
+    #     if not username:
+    #         username = input('USGS/ERS username: ')
+    #     if not password:
+    #         password = getpass.getpass('USGS/ERS password: ')
 
     # End date argument not provided?: Use the current date
     if not enddate:
        enddate = datetime.datetime.today().strftime('%Y-%m-%d')
+    enddatetuple = datetime.datetime.strptime(enddate, '%Y-%m-%d')
        
     print('\nChecks completed.')
  
-    print('\n***** Getting the Minimum Bounding Rectangle (MBR) for the region of interest.....\n')
+    print('\n***** Getting the list of Sentinel 2 MGRS tiles for the region of interest.....\n')
  
     # Get WRS-2 Path-Row numbers - using either the ieo.WRS2 geopackage or the updateshp.ini file's path-row range specification
-    paths, rows, pathrowstrs = getPathsRows(ieo.config['Landsat']['useWRS2'], \
-                                            ieo.config['Landsat']['pathrowvals'])
-
+    # paths, rows, pathrowstrs = getPathsRows(ieo.config['Landsat']['useWRS2'], \
+    #                                         ieo.config['Landsat']['pathrowvals'])
+    MGRStilelist = ieo.Sen2tilelist
+    
     # Parse the Minimum Bounding Rectangle argument if provided;
     #    otherwise, construct it
-    if MBR:
-        MBR = MBR.split(',')
-        if len(MBR) != 4:
-            ieo.logerror('--MBR', 'Total number of coordinates does not equal four.', errorfile = errorfile)
-            print('Error: Improper number of coordinates for --MBR set (must be four). Either remove this option (will use default values) or fix. Exiting.')
-            sys.exit()
-    else:
-        MBR = getMBR(baseURL, version, paths, rows)
+    # if MBR:
+    #     MBR = MBR.split(',')
+    #     if len(MBR) != 4:
+    #         ieo.logerror('--MBR', 'Total number of coordinates does not equal four.', errorfile = errorfile)
+    #         print('Error: Improper number of coordinates for --MBR set (must be four). Either remove this option (will use default values) or fix. Exiting.')
+    #         sys.exit()
+    # else:
+    #     MBR = getMBR(baseURL, version, paths, rows)
     
-    print('\nMBR set: {}.'.format(MBR))
+    # print('\nMBR set: {}.'.format(MBR))
 
     # =============================================================================
     # Mainline processing proper begins here
     # =============================================================================
     
-    print('\n***** Opening the IEO Landsat catalog ({}).....\n'.format(ieo.catgpkg))
+    print('\n***** Opening the IEO Sentinel 2 catalog ({}).....\n'.format(ieo.catgpkg))
     
     # Open the IEO geopackage - or create it if it does not exist
     data_source, layer, fieldvaluelist, fnames = openIEO()
     
-    print('\n***** Inspecting the current contents of the IEO Landsat catalog.....\n')
+    print('\n***** Inspecting the current contents of the IEO Sentinel 2 catalog.....\n')
     
-    # Retrieve the details of the features (scenes) that have alrready been added
+    # Retrieve the details of the features (scenes) that have already been added
     #    to the IEO geopackage (catalog)
-    scenelist, updatemissing, badgeom, lastmodifiedDate = \
+    ProductIDs, updatemissing, badgeom, lastmodifiedDate = \
         readIEO(layer)
     
-    print('\n***** Opening a connection to the USGS/ERS {} service.....\n'.format(catalogID))
     
-    # Connect to the specified catalog (EarthExplorer) on the specified USGS server
-    apiKey = openUSGS(baseURL, version, catalogID, username, password)
+    if lastmodifiedDate and not rescan:
+        startdate = lastmodifiedDate #.strftime('%Y-%m-%d')
+        if ieo.usePostGIS:
+            datetimestr = '%Y/%m/%d %H:%M:%S+00'
+        else:
+            datetimestr = '%Y/%m/%d %H:%M:%S'
+        startdatetuple = datetime.datetime.strptime(lastmodifiedDate, datetimestr)
+    else:
+        startdatetuple = datetime.datetime.strptime(startdate, '%Y-%m-%d')
     
-    # Place the API key in the HTTP headers
-    headers = {'X-Auth-Token': apiKey}  
+    
+    
+    # print('\n***** Opening a connection to the USGS/ERS {} service.....\n'.format(catalogID))
+    print(f'\nNow querying S3 buckets for Sentinel 2 scenes acquired between {startdate} and {enddate}.')
+    if not bucket:
+        scenedict = S3ObjectStorage.getSentinel2scenedict(MGRStilelist, startdate = startdatetuple, enddate = enddatetuple, verbose = verbose)
+    else:
+        scenedict = S3ObjectStorage.getSentinel2scenedictFromFlatBucket(MGRStilelist, bucket, startdate = startdatetuple, enddate = enddatetuple, verbose = verbose)
+    # # Connect to the specified catalog (EarthExplorer) on the specified USGS server
+    # apiKey = openUSGS(baseURL, version, catalogID, username, password)
+    
+    # # Place the API key in the HTTP headers
+    # headers = {'X-Auth-Token': apiKey}  
     
     print('\n***** Retrieving the details of the in-scope USGS/ERS Landsat scenes.....\n')
     
-    scenedict, queryfieldnames = \
-        readUSGS(baseURL, version, headers, \
-                    MBR, pathrowstrs, \
-                    startdate, enddate, \
-                    maxResults, savequeries, \
-                    scenelist, updatemissing, badgeom, lastmodifiedDate, \
-                    fieldvaluelist)
+    # scenedict, queryfieldnames = \
+    #     readUSGS(baseURL, version, headers, \
+    #                 MBR, pathrowstrs, \
+    #                 startdate, enddate, \
+    #                 maxResults, savequeries, \
+    #                 scenelist, updatemissing, badgeom, lastmodifiedDate, \
+    #                 fieldvaluelist)
+    buckets = sorted(scenedict.keys())
     
-    sceneIDs = scenedict.keys()
+    print(f'A total of {len(ProductIDs)} scenes currently exist in the geodatabase.')
     
-    if len(sceneIDs) == 0:
+    if len(buckets) == 0:
         print('\nNo scenes to be added or updated in IEO geopackage layer.\n')
     else:
         print('\n***** Updating the IEO catalog (geopackage).....\n')
         
-        print('Total scenes to be added or updated to IEO geopackage layer: {}\n'.format(len(sceneIDs)))
+        print(f'{len(buckets)} buckets identified with possible scenes to be added or updated to IEO geopackage layer.\n')
 
-        updateIEO(layer, fieldvaluelist, fnames, queryfieldnames, \
-                  sceneIDs, scenedict)
+        layer = updateIEO(layer, fieldvaluelist, fnames, \
+                  ProductIDs, scenedict, bucket = bucket)
     
     # If enabled, download the thumbnails images for any new or modified scenes 
-    if thumbnails:
-        print('\r***** Downloading thumbnails.....' + (' ' * 50) + '\n')
+    # if thumbnails:
+    #     print('\r***** Downloading thumbnails.....' + (' ' * 50) + '\n')
         
-        getThumbnails(layer, updatemissing, badgeom)
+    #     getThumbnails(layer, updatemissing, badgeom)
     
     # Close the USGS/ERS connection
-    print('\r***** Closing the connection to the USGS/ERS {} service.....'.format(catalogID))
-    closeUSGS(baseURL, version, headers)
+    # print('\r***** Closing the connection to the USGS/ERS {} service.....'.format(catalogID))
+    # closeUSGS(baseURL, version, headers)
 
     # Close the IEO geopackage
     print('\n***** Closing the IEO catalog (geopackage).....')
     data_source = None
+    layer = None
 
     # All done
     print('\n***** Processing completed.')
@@ -1535,23 +1535,24 @@ def main(username=None, password=None, catalogID='EE', version='stable', \
 if __name__ == '__main__':
     
     # Parse the expected command line arguments
-    parser = argparse.ArgumentParser('This script imports LEDAPS-processed scenes into the local library. It stacks images and converts them to the locally defined projection in IEO, and adds ENVI metadata.')
-    parser.add_argument('-u','--username', type = str, default = None, help = 'USGS/EROS Registration System (ERS) username.')
-    parser.add_argument('-p', '--password', type = str, default = None, help = 'USGS/EROS Registration System (ERS) password.')
-    parser.add_argument('-c', '--catalogID', type = str, default = 'EE', help = 'USGS/EROS Catalog ID (default = "EE").')
-    parser.add_argument('-v', '--version', type = str, default = "stable", help = 'JSON version, default = stable.')
-    parser.add_argument('--startdate', type = str, default = "1982-07-16", help = 'Start date for query in YYYY-MM-DD format. (Default = 1982-07-16, e.g., Landsat 4 launch date).')
+    parser = argparse.ArgumentParser('This script imports Sentinel-2 scene metadata data extent polygons intothe local library.')
+    # parser.add_argument('-u','--username', type = str, default = None, help = 'USGS/EROS Registration System (ERS) username.')
+    # parser.add_argument('-p', '--password', type = str, default = None, help = 'USGS/EROS Registration System (ERS) password.')
+    # parser.add_argument('-c', '--catalogID', type = str, default = 'EE', help = 'USGS/EROS Catalog ID (default = "EE").')
+    # parser.add_argument('-v', '--version', type = str, default = "stable", help = 'JSON version, default = stable.')
+    parser.add_argument('--startdate', type = str, default = "2015-06-23", help = 'Start date for query in YYYY-MM-DD format. (Default = 2015-06-23, e.g., Sentinel 2A launch date).')
     parser.add_argument('--enddate', type = str, default = None, help = "End date for query in YYYY-MM-DD format. (Default = today's date).")
-    parser.add_argument('-m', '--MBR', type = str, default = None, help = 'Minimum Bounding Rectangle (MBR) coordinates in decimal degrees in the following format (comma delimited, no spaces): lower left latitude, lower left longitude, upper right latitude, upper right longitude. If not supplied, these will be determined from WRS-2 Paths and Rows in updateshp.ini.')
-    parser.add_argument('-b', '--baseURL', type = str, default = 'https://m2m.cr.usgs.gov/api/api/json/', help = 'Base URL to use excluding JSON version (Default = "https://m2m.cr.usgs.gov/api/api/json/").')
-    parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
-    parser.add_argument('--thumbnails',  action = 'store_true', help = 'Download thumbnails (default = False).')
-    parser.add_argument('--savequeries', action = 'store_true', help = 'Save queries.')
+    # parser.add_argument('-m', '--MBR', type = str, default = None, help = 'Minimum Bounding Rectangle (MBR) coordinates in decimal degrees in the following format (comma delimited, no spaces): lower left latitude, lower left longitude, upper right latitude, upper right longitude. If not supplied, these will be determined from WRS-2 Paths and Rows in updateshp.ini.')
+    # parser.add_argument('-b', '--baseURL', type = str, default = 'https://m2m.cr.usgs.gov/api/api/json/', help = 'Base URL to use excluding JSON version (Default = "https://m2m.cr.usgs.gov/api/api/json/").')
+    # parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
+    # parser.add_argument('--thumbnails',  action = 'store_true', help = 'Download thumbnails (default = False).')
+    parser.add_argument('--bucket', type = str, default = None, help = 'Specify bucket to scan for scenes. Default = None.')
+    parser.add_argument('--rescan', action = 'store_true', help = 'Rescan buckets for Sentinel-2 scenes, ignoring any previously scanned results.')
     parser.add_argument('--verbose', action = 'store_true', help = 'Display more messages during migration.')
     
     args = parser.parse_args()
  
     # Pass the parsed arguments to mainline processing   
-    main(args.username, args.password, args.catalogID, args.version, args.startdate, args.enddate, \
-         args.MBR, args.baseURL, args.maxResults, args.thumbnails, args.savequeries, \
-             args.verbose)
+    main(args.startdate, args.enddate, args.rescan, args.verbose, args.bucket) #args.username, args.password, args.catalogID, args.version, 
+         #args.MBR, args.baseURL, args.maxResults, args.thumbnails, args.savequeries, \
+             
