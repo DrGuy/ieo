@@ -114,9 +114,9 @@ def getMundibucketList(sentinel, *args, **kwargs):
         sensor = sensordict[sentinel]['default']
     now = datetime.datetime.now()
     for year in range(sensordict[sentinel]['startyear'], now.year + 1):
-        if year < sensordict[sentinel]['qyear']:
+        if year < sensordict[sentinel]['qyear'] or year >= 2022:
             sentinelbuckets.append('s{}-{}-{}'.format(sentinel, sensor, year).lower())
-        elif year < now.year and year >= sensordict[sentinel]['qyear']:
+        elif year >= sensordict[sentinel]['qyear'] and year < 2022:
             for q in range(0, 4):
                 sentinelbuckets.append('s{}-{}-{}-q{}'.format(sentinel, sensor, year, q + 1).lower())
         else:
@@ -191,7 +191,7 @@ def getSentinel2scenedict(granulelist, *args, **kwargs):
         # days = []
         if usebucket:
             bucket = usebucket
-        elif datetuple.year >= sensordict['2']['qyear']:
+        elif datetuple.year >= sensordict['2']['qyear'] and datetuple.year < 2022:
             q = (datetuple.month - 1) // 3 + 1
             bucket = f's2-l2a-{datetuple.year}-q{q}'
         else:
@@ -368,12 +368,15 @@ def download_s3_folder(bucket_name, s3_folder, local_dir):
             os.makedirs(os.path.dirname(target))
         if obj.key[-1] == '/':
             continue
-        bucket.download_file(obj.key, target)
+        try:
+            bucket.download_file(obj.key, target)
+        except Exception as e:
+            print(f'ERROR: {e}')
 
 def copyfilestobucket(*args, **kwargs):
     # This function will copy local files to a specified S3 bucket
     bucket = kwargs.get('bucket', None) # name of S3 bucket to save files.
-    filename = kwargs.get('filename', None) # single file to be coped to S3 bucket
+    filename = kwargs.get('filename', None) # single file to be copied to S3 bucket
     filelist = kwargs.get('filelist', None) # list of files to be copied to S3 bucket
     copydir = kwargs.get('copydir', None) # directory containing files to be copied to S3 bucket
     inbasedir = kwargs.get('inbasedir', None) # start of local directory path to be stripped from full file path. Only used if "copydir" is is not used.
@@ -524,6 +527,20 @@ def downloadscene(scenedict, sceneid, downloaddir):
                 os.makedirs(s3_object)
     print('Scene {} has been downloaded.'.format(sceneid))
 
+def movefile(f, inbucket, outbucket, outf, *args, **kwargs):
+    i = kwargs.get('i', None)
+    n = kwargs.get('n', None)
+    if i:
+        print(f'Now transferring from bucket {inbucket} to bucket {outbucket}: {f} ({i}/{n})')
+    else: 
+        print(f'Now transferring from bucket {inbucket} to bucket {outbucket}: {f}')
+    copy_source = {
+                    'Bucket': inbucket,
+                    'Key': f
+                }
+    s3res.meta.client.copy(copy_source, outbucket, outf)
+    s3res.Object(inbucket, f).delete()
+    
 s3cli = s3client()
 s3res = s3resource()         
 

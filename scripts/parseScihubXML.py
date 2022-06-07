@@ -25,17 +25,24 @@ except:
 
 parser = argparse.ArgumentParser('This script imports Sentinel-2 Scihub metadata into PostGIS.')
 parser.add_argument('-p', '--password', default = None, type = str, help = 'Password to log into PostGIS server.')
+parser.add_argument('-d', '--dirname', default = '~/ingest', type = str, help = 'Directory containing SciHub XML files.')
 args = parser.parse_args()
 
 source_prj = osr.SpatialReference()
 source_prj.ImportFromEPSG(4326)
 transform = osr.CoordinateTransformation(source_prj, ieo.prj)
-IE_ds = ogr.Open(f'{ieo.ieogpkg} password={args.password}', 0)
+if args.password:
+    IE_ds = ogr.Open(f'{ieo.ieogpkg} password={args.password}', 0)
+else:
+    IE_ds = ogr.Open(ieo.ieogpkg, 0)
 IE_layer = IE_ds.GetLayer('Ireland_Island')
 IE_feat = IE_layer.GetNextFeature()
 IE_geom = IE_feat.GetGeometryRef()
 
-ds = ogr.Open(f'{ieo.catgpkg} password={args.password}', 1)
+if args.password:
+    ds = ogr.Open(f'{ieo.catgpkg} password={args.password}', 1)
+else:
+    ds = ogr.Open(ieo.catgpkg, 1)
 layer = ds.GetLayer(ieo.Sen2shp)
 layerDefn = layer.GetLayerDefn()
 fieldlist = []
@@ -44,7 +51,7 @@ for i in range(layerDefn.GetFieldCount()):
     if not fieldName in fieldlist:
         fieldlist.append(fieldName)
 
-outdir = r'C:\Users\guyse\OneDrive - EOanalytics.ie\EOanalytics\Projects\Github\test\scihub'
+outdir = args.dirname
 
 def scanMTDfile(f, *args, **kwargs):
     # featuredict = kwargs.get('featuredict', {})
@@ -155,7 +162,7 @@ tagdict = {
             }
     }
 
-flist = glob.glob(os.path.join(outdir, 'scihub_query_S2MSI2Ap_*.xml'))
+flist = glob.glob(os.path.join(outdir, 'scihub_query_S2MSI2*.xml'))
 updatedfeats = 0
 newfeats = 0
 for f in flist:
@@ -196,11 +203,13 @@ for f in flist:
                 elif s.tag.endswith('str'):
                     if s.attrib['name'] in tagdict['str']['name'].keys():
                         scenedict[ProductID][tagdict['str']['name'][s.attrib['name']]] = s.text
+                    elif s.attrib['name'] == 'gmlfootprint':
+                        gml = s.text
             parts = ProductID.split('_')
             acqdate = datetime.datetime.strptime(parts[2], '%Y%m%dT%H%M%S')
             scenedict[ProductID]['sceneID'] = f'{parts[0]}{parts[5]}{acqdate.strftime("%Y%j")}ESA00' # Creates a fake USGS-like Scene Identifier
             # print(f'{ProductID} geometry: {scenedict[ProductID]["WKT"]}')
-            geom = ogr.CreateGeometryFromWkt(scenedict[ProductID]['WKT'])
+            geom = ogr.CreateGeometryFromGML(gml) #(scenedict[ProductID]['WKT'])
             
             geom.Transform(transform)
             mgeom = ogr.Geometry(ogr.wkbMultiPolygon)

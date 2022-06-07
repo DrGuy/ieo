@@ -12,7 +12,7 @@
 # 4. Calculates NDVI and EVI for clear land pixels
 # 5. Archives tar.gz files after use
 
-import os, sys, glob, datetime, argparse#, ieo, shutil
+import os, sys, glob, datetime, argparse, shutil#, ieo, shutil
 from osgeo import ogr
 
 try: # This is included as the module may not properly install in Anaconda.
@@ -51,7 +51,8 @@ parser.add_argument('--noNDVI', action = 'store_true', help = 'Do not calculate 
 parser.add_argument('--noEVI', action = 'store_true', help = 'Do not calculate EVI.')
 parser.add_argument('--noNDTI', action = 'store_true', help = 'Do not calculate NDTI.')
 parser.add_argument('--noNBR', action = 'store_true', help = 'Do not calculate NBR.')
-parser.add_argument('-r', '--remove', type = bool, default = False, help = 'Remove temporary files after ingest.')
+parser.add_argument('-r', '--remove', type = bool, default = True, help = 'Remove temporary files after ingest.')
+parser.add_argument('--useS3', action = 'store_true', help = 'If set, copy outputs to S3 storage. Otherwise defaults to ieo.useS3')
 args = parser.parse_args()
 
 if args.delay > 0: # if we want to delay execution for whatever reason
@@ -59,7 +60,11 @@ if args.delay > 0: # if we want to delay execution for whatever reason
     print('Delaying execution {} seconds.'.format(args.delay))
     sleep(args.delay)
 
-
+if not args.useS3:
+    useS3 = ieo.useS3
+else:
+    useS3 = args.useS3
+    
 # Setting a few variables
 archdir = args.archdir
 # fmaskdir = args.fmaskdir
@@ -150,7 +155,14 @@ for f in filelist:
     if args.overwrite or not any(scene in x for x in reflist):
 #        try:
         print('\nProcessing archive {}, file number {} of {}.\n'.format(f, filenum, numfiles))
-        ieo.importespatotiles(f, remove = args.remove, overwrite = args.overwrite)
+        ieo.importespatotiles(f, remove = args.remove, useS3 = useS3, overwrite = args.overwrite)
+        if args.removelocal:
+            localdirs = glob.glob(f'{f[:-4]}*')
+            if len(localdirs) > 0:
+                for d in localdirs:
+                    if os.path.isdir(d):
+                        print(f'Deleting temporary directory: {d}')
+                        shutil.rmtree(d)
 #        except Exception as e:
 #            print('There was a problem processing the scene. Adding to error list.')
 #            exc_type, exc_obj, exc_tb = sys.exc_info()
