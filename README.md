@@ -7,4 +7,4 @@ This library, at present, is designed to import data from Landsat. The library w
 
 As of version 1.1.0, this module will now support any local/ regional projection available. The user, however, will have to replace Ireland-specific data sets with those appropriate to their local region. Regional settings can be set by modifying config/sample_ieo.ini to config/ieo.ini.
 
-Currently, only Landsat functionality is being actively maintained by the author, with Sentinel-2 support to be added soon.
+Currently, only Landsat 4-5 TM, 7 ETM+, 8-9 ETM+, and Sentinel-2 MSI functionality are being actively maintained by the author.
