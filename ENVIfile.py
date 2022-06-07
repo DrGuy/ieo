@@ -4,7 +4,7 @@
 # email: guyserbin <at> eoanalytics <dot> ie
 
 # Irish Earth Observation (IEO) Python Module
-# version 1.3
+# version 1.5
 
 import os, sys, shutil, datetime
 from osgeo import osr
@@ -17,8 +17,17 @@ else:
 # Read in config information
 global prjval, projinfo, mapinfostr, gcsstring, prj
 config = configparser.ConfigParser()
-config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
-config.read(config_location) # config_path
+# ieoconfigdir = os.getenv('IEO_CONFIGDIR')
+# if ieoconfigdir:
+#     configfile = os.path.join(ieoconfigdir, 'ieo.ini')
+# else:
+# configfile = 'config/ieo.ini'
+# config_location = resource_filename(Requirement.parse('ieo'), configfile)
+# config_location = resource_filename(Requirement.parse('ieo'), 'config/ieo.ini')
+cwd = os.path.abspath(os.path.dirname(__file__))    
+print(cwd)
+configfile = os.path.join(cwd, 'config/ieo.ini')
+config.read(configfile) # config_path
 
 # Spatial variables
 prjvalstr = config['Projection']['proj']
@@ -89,6 +98,27 @@ headerdict['pixel_qa'].update({
     'defaultbasefilename': '%s_pixel_qa.dat', # sceneid
     'data ignore value': 1})
 
+headerdict['SR_QA_AEROSOL'] = headerdict['default'].copy() # Added in version 1.5 
+headerdict['SR_QA_AEROSOL'].update({
+    'description': 'Landsat Aerosol QA Layer %s',  # sceneid
+    'band names': ['Aerosol QA'], # sceneid
+    'defaultbasefilename': '%s_SR_QA_AEROSOL.dat', # sceneid
+    'data ignore value': 1})
+
+headerdict['QA_RADSAT'] = headerdict['default'].copy() # Added in version 1.5 
+headerdict['QA_RADSAT'].update({
+    'description': 'Landsat Radiometric Saturation QA Layer %s',  # sceneid
+    'band names': ['RADSAT QA'], # sceneid
+    'defaultbasefilename': '%s_QA_RADSAT.dat', # sceneid
+    })
+
+headerdict['Landsat ST'] = headerdict['default'].copy() # Added in version 1.5
+headerdict['Landsat ST'].update({
+    'description': 'Landsat Surface Temperature (%s)',  # sceneid
+    'band names': ['Surface Temperature'], # sceneid
+    'defaultbasefilename': '%s_ST.dat', # sceneid
+    'data ignore value': -9999}) 
+
 headerdict['Landsat Band6'] = headerdict['default'].copy()
 headerdict['Landsat Band6'].update({
     'description': 'LEDAPS Brightness Temperature (%s)',  # sceneid
@@ -101,7 +131,7 @@ headerdict['Landsat Band6'].update({
 
 headerdict['Landsat TIR'] = headerdict['default'].copy()
 headerdict['Landsat TIR'].update({
-    'description': 'LEDAPS Brightness Temperature (%s)',  # sceneid
+    'description': 'Landsat Brightness Temperature (%s)',  # sceneid
     'band names': ['TIR 1', 'TIR 2'], # sceneid
     'wavelength': [10.895000, 12.005000],
     'wavelength units': 'Micrometers',
@@ -111,7 +141,7 @@ headerdict['Landsat TIR'].update({
 
 headerdict['Landsat TM'] = headerdict['default'].copy()
 headerdict['Landsat TM'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.485000, 0.560000, 0.662000, 0.830000, 1.648000, 2.215000],
     'wavelength units': 'Micrometers',
@@ -122,7 +152,7 @@ headerdict['Landsat TM'].update({
 
 headerdict['Landsat ETM+'] = headerdict['default'].copy()
 headerdict['Landsat ETM+'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.483000, 0.560000, 0.662000, 0.835000, 1.648000, 2.206000],
     'wavelength units': 'Micrometers',
@@ -133,7 +163,7 @@ headerdict['Landsat ETM+'].update({
 
 headerdict['Landsat OLI'] = headerdict['default'].copy()
 headerdict['Landsat OLI'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'NIR', 'SWIR 1', 'SWIR 2'], # sceneid
     'wavelength': [0.443000, 0.482600, 0.561300, 0.654600, 0.864600, 1.609000, 2.201000],
     'wavelength units': 'Micrometers',
@@ -144,7 +174,7 @@ headerdict['Landsat OLI'].update({
     
 headerdict['Landsat MSS'] = headerdict['default'].copy()
 headerdict['Landsat MSS'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
+    'description': 'Landsat Surface Reflectance (%s)',  # sceneid
     'band names': ['Green', 'Red', 'Red Edge', 'NIR'], # sceneid
     'wavelength': [0.55, 0.65, 0.75, 0.95],
     'wavelength units': 'Micrometers',
@@ -155,14 +185,80 @@ headerdict['Landsat MSS'].update({
 
 headerdict['Sentinel-2'] = headerdict['default'].copy()
 headerdict['Sentinel-2'].update({
-    'description': 'LEDAPS Surface Reflectance (%s)',  # sceneid
-    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR broad', 'NIR narrow', 'NIR water vapor', 'Cirrus', 'SWIR 1', 'SWIR 2'], # sceneid
-    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.375, 1.61, 2.19],
+    'description': 'Sentinel-2 Surface Reflectance (%s)',  # sceneid
+    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR broad', 'NIR narrow', 'NIR water vapor', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.705, 0.74, 0.783, 0.842, 0.865, 0.945, 1.61, 2.19], # , 1.375
     'wavelength units': 'Micrometers',
-    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0075, 0.0075, 0.01, 0.0575, 0.01, 0.01, 0.015, 0.045, 0.09],
-    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 6, 4, 1.5],
-    'default bands': [13, 8, 2],
-    'defaultbasefilename': '%s_ref.dat' # sceneid
+    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0075, 0.0075, 0.01, 0.0575, 0.01, 0.01, 0.045, 0.09], # , 0.015
+    'solar irradiance': [129, 128, 128, 108, 74.5, 68, 67, 103, 52.5, 9, 4, 1.5], # , 6
+    'default bands': [12, 8, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_10m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_10m'].update({
+    'description': 'Sentinel-2 10m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Blue', 'Green', 'Red', 'NIR broad'], # sceneid , 'Cirrus'
+    'wavelength': [0.49, 0.56, 0.665, 0.842], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0325, 0.0175, 0.015, 0.0575], # , 0.015
+    'solar irradiance': [128, 128, 108, 103], # , 6
+    'default bands': [4, 3, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_20m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_20m'].update({
+    'description': 'Sentinel-2 20m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Red Edge 1', 'Red Edge 2', 'Red Edge 3', 'NIR narrow', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.705, 0.74, 0.783, 0.865, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0075, 0.0075, 0.01, 0.01, 0.045, 0.09], # , 0.015
+    'solar irradiance': [74.5, 68, 67, 52.5, 4, 1.5], # , 6
+    'default bands': [3, 2, 1],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['Sentinel-2_60m'] = headerdict['default'].copy()
+headerdict['Sentinel-2_60m'].update({
+    'description': 'Sentinel-2 60m Band Surface Reflectance (%s)',  # sceneid
+    'band names': ['Coastal aerosol', 'NIR water vapor'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.945], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.01, 0.01], # , 0.015
+    'solar irradiance': [129, 6], # , 6
+    # 'default bands': [12, 8, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['S2OLI'] = headerdict['default'].copy()
+headerdict['S2OLI'].update({
+    'description': 'Sentinel-2 OLI Equivalent Surface Reflectance (%s)',  # sceneid
+    'band names': ['Coastal aerosol', 'Blue', 'Green', 'Red', 'NIR broad', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.443, 0.49, 0.56, 0.665, 0.842, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.01, 0.0325, 0.0175, 0.015, 0.0575, 0.045, 0.09], # , 0.015
+    'solar irradiance': [129, 128, 128, 108, 103, 4, 1.5], # , 6
+    'default bands': [7, 5, 2],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
+    }) 
+
+headerdict['S2TM'] = headerdict['default'].copy()
+headerdict['S2TM'].update({
+    'description': 'Sentinel-2 TM/ETM+ Equivalent Surface Reflectance (%s)',  # sceneid
+    'band names': ['Blue', 'Green', 'Red', 'NIR broad', 'SWIR 1', 'SWIR 2'], # sceneid , 'Cirrus'
+    'wavelength': [0.49, 0.56, 0.665, 0.842, 1.61, 2.19], # , 1.375
+    'wavelength units': 'Micrometers',
+    'fwhm': [0.0325, 0.0175, 0.015, 0.0575, 0.045, 0.09], # , 0.015
+    'solar irradiance': [128, 128, 108, 103, 4, 1.5], # , 6
+    'default bands': [6, 4, 1],
+    'defaultbasefilename': '%s_ref.dat', # sceneid
+    'data ignore value': 0 
     }) 
 
 headerdict['NDVI'] = headerdict['default'].copy()
@@ -170,6 +266,22 @@ headerdict['NDVI'].update({
     'description': 'NDVI (%s)',  # sceneid
     'band names': ['NDVI'], # sceneid
     'defaultbasefilename': '%s_NDVI.dat', # sceneid
+    'data ignore value': 0.0
+    }) 
+
+headerdict['NDTI'] = headerdict['default'].copy()
+headerdict['NDTI'].update({
+    'description': 'NDTI (%s)',  # sceneid
+    'band names': ['NDTI'], # sceneid
+    'defaultbasefilename': '%s_NDTI.dat', # sceneid
+    'data ignore value': 0.0
+    }) 
+
+headerdict['NBR'] = headerdict['default'].copy()
+headerdict['NBR'].update({
+    'description': 'NBR (%s)',  # sceneid
+    'band names': ['NBR'], # sceneid
+    'defaultbasefilename': '%s_NBR.dat', # sceneid
     'data ignore value': 0.0
     }) 
 
@@ -181,7 +293,27 @@ headerdict['EVI'].update({
     'data ignore value': 0.0
     }) 
     
-headerdict['Landsat'] = {'LE7': 'Landsat ETM+', 'LT4': 'Landsat TM', 'LT5': 'Landsat TM', 'LM1': 'Landsat MSS', 'LM2': 'Landsat MSS', 'LM3': 'Landsat MSS', 'LM4': 'Landsat MSS', 'LM5': 'Landsat MSS', 'LO8': 'Landsat OLI', 'LT8': 'Landsat TIR', 'LC8': {'ref': 'Landsat OLI', 'BT': 'Landsat TIR'}}
+headerdict['Landsat'] = {'LE7': 'Landsat ETM+', 
+                         'LT4': 'Landsat TM', 
+                         'LT5': 'Landsat TM', 
+                         'LM1': 'Landsat MSS', 
+                         'LM2': 'Landsat MSS', 
+                         'LM3': 'Landsat MSS', 
+                         'LM4': 'Landsat MSS', 
+                         'LM5': 'Landsat MSS', 
+                         'LO8': 'Landsat OLI', 
+                         'LT8': 'Landsat TIR', 
+                         'LC8': {
+                             'ref': 'Landsat OLI', 
+                             'BT': 'Landsat TIR'
+                             }, 
+                         'LO9': 'Landsat OLI', 
+                         'LT9': 'Landsat TIR', 
+                         'LC9': {
+                             'ref': 'Landsat OLI', 
+                             'BT': 'Landsat TIR'
+                             }
+                         }
 
 
     
@@ -281,6 +413,10 @@ class ENVIfile(object):
         
         # Determine proper raster and sensor types
         self.SceneID = kwargs.get('SceneID', None)
+        self.ProductID = kwargs.get('ProductID', None)
+        if not self.SceneID:
+            if self.ProductID:
+                self.SceneID = self.ProductID
         self.header.sensortype = kwargs.get('sensortype', None)
         self.header.sensortype = kwargs.get('sensor', None)
         if rastertype in ['ref', 'BT']:
@@ -289,6 +425,12 @@ class ENVIfile(object):
                 self.header.sensortype = self.rastertype
             elif self.SceneID[:3] == 'LC8':
                 self.rastertype = headerdict['Landsat']['LC8'][rastertype]
+                if rastertype == 'BT':
+                    self.header.sensortype = 'Landsat TIR'
+                else: 
+                    self.header.sensortype = 'Landsat OLI'
+            elif self.SceneID[:3] == 'LC9':
+                self.rastertype = headerdict['Landsat']['LC9'][rastertype]
                 if rastertype == 'BT':
                     self.header.sensortype = 'Landsat TIR'
                 else: 
@@ -308,7 +450,7 @@ class ENVIfile(object):
                 if self.SceneID[:1] == 'S':
                     self.header.sensortype = 'Sentinel-2'
                 elif self.SceneID[:1] == 'L':
-                    if self.SceneID[2:3] == '8':
+                    if self.SceneID[2:3] in ['8', '9']:
                         self.header.sensortype = 'Landsat OLI'
                     else:
                         self.header.sensortype = headerdict['Landsat'][self.SceneID[:3]] 
@@ -531,7 +673,18 @@ class ENVIfile(object):
             self.header.acquisitiontime = None
         if not self.header.parentrasters: 
             if 'parentrasters' in self.header.dict.keys():
-                self.header.parentrasters = self.header.dict['parentrasters']
+                if self.header.dict['parentrasters'].startswith('parent'):
+                    self.header.parentrasters = self.header.dict['parentrasters']
+                else:
+                    self.header.parentrasters = 'parent rasters = { '
+                    if isinstance(self.header.dict['parentrasters'], list):
+                        for item in self.header.dict['parentrasters']:
+                            if self.header.dict['parentrasters'].index(item) > 0:
+                                self.header.parentrasters += ', '
+                            self.header.parentrasters += item
+                        self.header.parentrasters += ' }\n'
+                    else:
+                        self.header.parentrasters += ('{}'.format(self.header.dict['parentrasters']) + ' }\n')
         
         return 
         
@@ -661,7 +814,19 @@ class ENVIfile(object):
                     self.header.headerstr += 'sensor type = %s\n'%self.header.sensortype
                 if self.header.acquisitiontime:
                     self.header.headerstr += self.header.acquisitiontime
-                if self.header.parentrasters:   
+                if self.header.parentrasters:
+                    if isinstance(self.header.parentrasters, list):
+                        if len(self.header.parentrasters) > 0:
+                            parentrasterstr = 'parent rasters = { '
+                            for item in self.header.parentrasters:
+                                if self.header.parentrasters.index(item) > 0:
+                                    parentrasterstr += ', '
+                                parentrasterstr += item
+                                parentrasterstr += ' }\n'
+                        else:
+                            parentrasterstr = ''
+                        self.header.parentrasters = parentrasterstr
+                        
                     self.header.headerstr += self.header.parentrasters
                 return 
                 
